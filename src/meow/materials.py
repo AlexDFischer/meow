@@ -39,7 +39,7 @@ class MaterialBase(BaseModel):
         raise NotImplementedError(msg)
 
     def _lumadd(self, sim: Any, env: Environment, unit: float) -> str:
-        from matplotlib.cm import get_cmap
+        import matplotlib as mpl
 
         n = self(env)
         wl = np.asarray(env.wl * unit, dtype=complex).ravel()
@@ -49,7 +49,7 @@ class MaterialBase(BaseModel):
         if not sim.materialexists(self.name):
             sim.setmaterial(sim.addmaterial("Sampled data"), "name", self.name)
             color = np.asarray(
-                self.meta.get("color") or get_cmap("jet")(np.abs(eps) / 15.0)
+                self.meta.get("color") or mpl.colormaps["jet"](np.abs(eps) / 15.0)
             )
             sim.setmaterial(self.name, "color", color)
 

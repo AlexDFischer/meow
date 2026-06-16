@@ -30,9 +30,6 @@ site_description = "Modeling of Eigenmodes and Overlaps in Waveguides"
 site_name = "meow"
 site_url = "https://gdsfactory.github.io/meow"
 
-[project.markdown_extensions.pymdownx.arithmatex]
-generic = true
-
 [project.plugins.mkdocstrings.handlers.python]
 inventories = [
   "https://docs.jax.dev/en/latest/objects.inv",
