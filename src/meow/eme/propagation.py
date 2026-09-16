@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 import jax.numpy as jnp
 import numpy as np
@@ -15,6 +15,17 @@ from meow.arrays import ComplexArray1D, ComplexArray2D, FloatArray1D
 from meow.cell import Cell
 from meow.eme.interface import compute_interface_s_matrices, compute_interface_s_matrix
 from meow.mode import Mode, Modes, inner_product
+
+FieldComponent: TypeAlias = Literal["Ex", "Ey", "Ez", "Hx", "Hy", "Hz"]
+
+_BACKWARD_COMPONENT_SIGN: dict[FieldComponent, int] = {
+    "Ex": 1,
+    "Ey": 1,
+    "Ez": -1,
+    "Hx": -1,
+    "Hy": -1,
+    "Hz": 1,
+}
 
 
 def compute_propagation_s_matrix(modes: Modes, cell_length: float) -> sax.SDictMM:
@@ -282,8 +293,9 @@ def plot_fields(
     backwards: list[ComplexArray1D],
     y: float,
     z: FloatArray1D,
+    component: FieldComponent = "Ex",
 ) -> tuple[ComplexArray2D, FloatArray1D]:
-    """Reconstruct an ``Ex(x, z)`` field slice from propagated modal amplitudes.
+    """Reconstruct a field component slice from propagated modal amplitudes.
 
     Args:
         modes: Mode sets for each cell.
@@ -292,11 +304,18 @@ def plot_fields(
         backwards: Backward amplitude vectors per cell.
         y: Transverse y-coordinate at which to sample the field.
         z: Global z-grid on which to reconstruct the field.
+        component: Name of the field component to reconstruct (e.g.
+            ``"Ex"``, ``"Ey"``, ``"Hz"``).
 
     Returns:
-        Tuple ``(field, x)`` where ``field`` is the complex ``Ex(z, x)``
+        Tuple ``(field, x)`` where ``field`` is the complex component(z, x)
         array and ``x`` is the transverse sampling grid.
     """
+    if component not in _BACKWARD_COMPONENT_SIGN:
+        valid = ", ".join(_BACKWARD_COMPONENT_SIGN)
+        msg = f"Unknown field component {component!r}; expected one of: {valid}."
+        raise ValueError(msg)
+
     mesh_y = cells[0].mesh.y
     mesh_x = cells[0].mesh.x
     mesh_x = mesh_x[:-1] + np.diff(mesh_x) / 2
@@ -312,12 +331,12 @@ def plot_fields(
         z_ = z[i_min:] if i_max == 0 else z[i_min:i_max]
         z_local = z_ - cell.z_min
         for mode, fwd, bwd in zip(mode_set, forward, backward, strict=False):
-            e_slice = mode.Ex[:, i_y]
+            e_slice = getattr(mode, component)[:, i_y]
             ex += jnp.outer(
                 fwd * e_slice.T, jnp.exp(2j * np.pi * mode.neff / mode.env.wl * z_local)
             )
             ex += jnp.outer(
-                bwd * e_slice.T,
+                _BACKWARD_COMPONENT_SIGN[component] * bwd * e_slice.T,
                 jnp.exp(-2j * np.pi * mode.neff / mode.env.wl * z_local),
             )
 
@@ -421,6 +440,7 @@ def propagate_modes(
     sax_backend: sax.BackendLike = "default",
     interface_kwargs: dict[str, Any] | None = None,
     track: bool = True,
+    component: FieldComponent = "Ex",
     tracking_inner_product: Callable = inner_product,
     interfaces_fn: Callable = compute_interface_s_matrices,
     interface_fn: Callable = compute_interface_s_matrix,
@@ -452,14 +472,16 @@ def propagate_modes(
             ``interfaces_fn`` and ``interface_fn``.
         track: Whether to reorder and phase-align modes between neighboring
             cells before propagation.
+        component: Name of the field component to reconstruct (e.g.
+            ``"Ex"``, ``"Ey"``, ``"Hz"``).
         tracking_inner_product: Inner product used for mode tracking.
         interfaces_fn: Factory for interface S-matrices across the stack.
         interface_fn: Factory for the identity-like same-basis interface used to
             seed the left-to-right accumulation.
 
     Returns:
-        ``(field, x)`` where ``field`` is the reconstructed ``Ex(z, x)`` slice
-        and ``x`` is the transverse sampling grid.
+        ``(field, x)`` where ``field`` is the reconstructed component(z, x)
+        slice and ``x`` is the transverse sampling grid.
     """
     if len(cells) != len(modes):
         msg = f"len(cells) != len(modes): {len(cells)} != {len(modes)}"
@@ -498,4 +520,4 @@ def propagate_modes(
     r2ls = r2l_matrices(pairs, actual_sax_backend)
 
     forwards, backwards = propagate(l2rs, r2ls, excitation_l, excitation_r)
-    return plot_fields(tracked_modes, cells, forwards, backwards, y, z)
+    return plot_fields(tracked_modes, cells, forwards, backwards, y, z, component)
