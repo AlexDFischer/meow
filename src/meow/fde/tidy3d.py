@@ -111,4 +111,5 @@ def compute_modes_tidy3d(
         ]
 
     modes = sorted(modes, key=lambda m: float(np.real(m.neff)), reverse=True)
+
     return post_process(modes)
