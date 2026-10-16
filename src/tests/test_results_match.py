@@ -385,79 +385,9 @@ def test_taper_matches_tidy3d(visualize: bool=False):
     if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
         raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
 
-# def test_bend_matches_tidy3d(visualize: bool=False):
-#     # load tidy3d results
-#     # tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_bend_data.csv"
-#     # tidy3d_results = pd.read_csv(tidy3d_results_fname)
-
-#     max_bend_radius = 20
-
-#     # structure is just a straight waveguide
-#     # we manually modify the bend radius in each cell
-
-#     waveguide_height = 0.5
-#     waveguide_width = 1
-#     waveguide_length = 30
-#     cladding_buffer = 2.5
-#     dl = 0.05
-
-#     x_min = -waveguide_width / 2 - cladding_buffer
-#     x_max = +waveguide_width / 2 + cladding_buffer
-#     y_min = -waveguide_height / 2 - cladding_buffer
-#     y_max = +waveguide_height / 2 + cladding_buffer
-
-#     num_cells = 10
-#     num_modes_per_cell = 9
-
-#     waveguide = mw.Structure(
-#         material=mw.silicon_nitride,
-#         geometry=mw.Box(
-#             x_min=-waveguide_width / 2,
-#             x_max=+waveguide_width / 2,
-#             y_min=-waveguide_height / 2,
-#             y_max=+waveguide_height / 2,
-#             z_min=0,
-#             z_max=waveguide_length
-#         ),
-#         mesh_order=1
-#     )
-#     cladding = mw.Structure(
-#         material=mw.silicon_oxide,
-#         geometry=mw.Box(
-#             x_min=-waveguide_width / 2 - cladding_buffer,
-#             x_max=+waveguide_width / 2 + cladding_buffer,
-#             y_min=-waveguide_height / 2 - cladding_buffer,
-#             y_max=+waveguide_height / 2 + cladding_buffer,
-#             z_min=0,
-#             z_max=waveguide_length,
-#         ),
-#         mesh_order=2
-#     )
-
-#     if visualize:
-#         import matplotlib
-#         from matplotlib import pyplot as plt
-
-#         fig, ax = plt.subplots(layout='constrained', dpi=300)
-
-#         ax.plot(tidy3d_results.num_points, tidy3d_results.bend_loss, label="Bend loss (Tidy3D)", linestyle="dotted", linewidth=2)
-#         ax.axhline(y=bend_loss, color='r', linestyle='--', label="Bend loss (MEOW)")
-#         ax.legend()
-#         ax.set_xlabel("Number of points in Euler curve (one greater than number of EME cells)")
-#         ax.set_ylabel(f"Bend losses (dB)")
-#         ax.set_title(f"Bend losses vs number of points in Euler curve for bend radius {bend_radius} um")
-#         plt.show()
-
-#     meow_tidy3d_diff = np.abs(bend_loss - tidy3d_results.bend_loss.iloc[-1])
-
-#     if visualize:
-#         print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
-
-#     if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
-#         raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
 
 if __name__ == "__main__":
     # If we're running this test from the command line, visualize results
-    # test_evanescent_coupler_matches_tidy3d(visualize=True)
-    # test_mmi_matches_tidy3d(visualize=True)
+    test_evanescent_coupler_matches_tidy3d(visualize=True)
+    test_mmi_matches_tidy3d(visualize=True)
     test_taper_matches_tidy3d(visualize=True)
