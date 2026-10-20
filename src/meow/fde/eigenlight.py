@@ -52,7 +52,7 @@ def compute_modes_eigenlight(
         raise NotImplementedError(msg)
 
     try:
-        import eigenlight
+        import eigenlight  # ty: ignore[unresolved-import]
     except ModuleNotFoundError as error:
         msg = (
             "The EigenLight backend requires the optional 'eigenlight' package. "

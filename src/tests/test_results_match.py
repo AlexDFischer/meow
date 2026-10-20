@@ -103,7 +103,7 @@ def test_evanescent_coupler_matches_tidy3d():
     meow_tidy3d_diff = np.abs(np.array(coupling_00_arr) - tidy3d_results.coupling_00)
     max_diff = np.max(np.abs(meow_tidy3d_diff))
     logger.info(
-        f"Max difference between MEOW and Tidy3D for evanescent coupler: {max_diff:.5f}"
+        "Max difference between MEOW and Tidy3D for evanescent coupler: %.5f", max_diff
     )
 
     if visualize:
@@ -235,8 +235,7 @@ def test_mmi_matches_tidy3d():
     )
 
     xsecs = [mw.CrossSection.from_cell(cell=cell, env=env) for cell in cells]
-    num_mmi_modes = 15
-    num_modes = [1, num_mmi_modes, 1]
+    num_modes = [1, 15, 1]
     modes = [
         mw.compute_modes(cs=xsec, num_modes=num_modes[i])
         for i, xsec in enumerate(xsecs)
@@ -271,7 +270,7 @@ def test_mmi_matches_tidy3d():
         np.array(output_coupling_symmetric_mode_arr) - tidy3d_results.coupling_00
     )
     max_diff = np.max(np.abs(meow_tidy3d_diff))
-    logger.info(f"Max difference between MEOW and Tidy3D for MMI: {max_diff:.5f}")
+    logger.info("Max difference between MEOW and Tidy3D for MMI: %.5f", max_diff)
 
     if visualize:
         _fig, ax = plt.subplots(layout="constrained", dpi=300)
@@ -385,22 +384,6 @@ def test_taper_matches_tidy3d():
     # should couple to the even fundamental mode that we excite
     modes_to_compare_and_plot = [0, 2, 4]
 
-    if visualize:
-        # visualize propagation
-        from matplotlib import pyplot as plt
-
-        z_arr = np.linspace(0, taper_length, 500)
-        field, x = mw.propagate_modes(modes, cells, y=0, z=z_arr)
-
-        _fig, ax = plt.subplots(figsize=(10, 4))
-        im = ax.pcolormesh(z_arr, x, np.abs(field).T, shading="auto", cmap="magma")
-        ax.set_xlabel("z [um]")
-        ax.set_ylabel("x [um]")
-        ax.set_title("|Ex(x, z)| from mw.propagate_modes")
-        plt.colorbar(im, ax=ax, label="|Ex|")
-        plt.tight_layout()
-        plt.show()
-
     output_mode_to_coupling_arr = {
         output_mode: [] for output_mode in modes_to_compare_and_plot
     }
@@ -425,9 +408,11 @@ def test_taper_matches_tidy3d():
         ]
     )
     max_diff = np.max(np.abs(meow_tidy3d_diff))
-    logger.info(f"Max difference between MEOW and Tidy3D for taper: {max_diff:.5f}")
+    logger.info("Max difference between MEOW and Tidy3D for taper: %.5f", max_diff)
 
     if visualize:
+        from matplotlib import pyplot as plt
+
         _fig, ax = plt.subplots(layout="constrained", dpi=300)
 
         for output_mode, coupling_arr in output_mode_to_coupling_arr.items():
@@ -535,7 +520,7 @@ def test_bend_matches_tidy3d():
     # dict of lists. The dict key is the mode index,
     # and the value is a list of couplings for that mode
     # across different bend radii
-    mode_index_bend_radius_to_couplings: dict[int, list[float]] = {
+    mode_index_bend_radius_to_couplings: dict[int, list[float | None]] = {
         mode_index: [] for mode_index in modes_to_compare_and_plot
     }
 
@@ -574,7 +559,7 @@ def test_bend_matches_tidy3d():
         for output_mode in modes_to_compare_and_plot:
             if len(S_matrix[0]) > 1 + output_mode:
                 mode_index_bend_radius_to_couplings[output_mode].append(
-                    np.abs(S_matrix[0][1 + output_mode]) ** 2
+                    abs(S_matrix[0][1 + output_mode]) ** 2  # ty: ignore[invalid-argument-type]
                 )
             else:
                 mode_index_bend_radius_to_couplings[output_mode].append(None)
@@ -589,7 +574,7 @@ def test_bend_matches_tidy3d():
         ]
     )
     max_diff = np.max(np.abs(meow_tidy3d_diff))
-    logger.info(f"Max difference between MEOW and Tidy3D for bend: {max_diff:.5f}")
+    logger.info("Max difference between MEOW and Tidy3D for bend: %.5f", max_diff)
 
     if visualize:
         import matplotlib.pyplot as plt
@@ -606,7 +591,7 @@ def test_bend_matches_tidy3d():
             )
             ax.plot(
                 bend_radius_arr,
-                coupling_arr,
+                coupling_arr,  # ty: ignore[invalid-argument-type]
                 label=f"Mode 0 -> {output_mode} coupling (MEOW)",
                 linestyle="solid",
                 linewidth=0.5,
@@ -643,17 +628,20 @@ if __name__ == "__main__":
         start = time.time()
         test_evanescent_coupler_matches_tidy3d()
         logger.info(
-            f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds"
+            "test_evanescent_coupler_matches_tidy3d took %.2f seconds",
+            (time.time() - start),
         )
 
         start = time.time()
         test_mmi_matches_tidy3d()
-        logger.info(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info("test_mmi_matches_tidy3d took %.2f seconds", (time.time() - start))
 
         start = time.time()
         test_taper_matches_tidy3d()
-        logger.info(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info(
+            "test_taper_matches_tidy3d took %.2f seconds", (time.time() - start)
+        )
 
         start = time.time()
         test_bend_matches_tidy3d()
-        logger.info(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info("test_bend_matches_tidy3d took %.2f seconds", (time.time() - start))
