@@ -1,9 +1,12 @@
 from functools import partial
 import numpy as np
 import pandas as pd
+import logging
 from pathlib import Path
 
 import meow as mw
+
+logger = logging.getLogger(__name__)
 
 si = mw.TidyMaterial(name="cSi", variant="Li1993_293K")
 sio2 = mw.TidyMaterial(name="SiO2", variant="Palik_LowLoss")
@@ -97,6 +100,8 @@ def test_evanescent_coupler_matches_tidy3d():
 
     meow_tidy3d_diff = np.abs(np.array(coupling_00_arr) - tidy3d_results.coupling_00)
     max_diff = np.max(np.abs(meow_tidy3d_diff))
+    logger.info(
+        f"Max difference between MEOW and Tidy3D for evanescent coupler: {max_diff:.5f}")
 
     if visualize:
         from matplotlib import pyplot as plt
@@ -112,7 +117,8 @@ def test_evanescent_coupler_matches_tidy3d():
         plt.show()
 
     if max_diff > 0.01:
-        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        error_msg = f"MEOW results do not closely match " \
+                    f"Tidy3D results. Max difference: {max_diff}"
         raise AssertionError(error_msg)
 
 def test_mmi_matches_tidy3d():
@@ -238,6 +244,7 @@ def test_mmi_matches_tidy3d():
 
     meow_tidy3d_diff = np.abs(np.array(output_coupling_symmetric_mode_arr) - tidy3d_results.coupling_00)
     max_diff = np.max(np.abs(meow_tidy3d_diff))
+    logger.info(f"Max difference between MEOW and Tidy3D for MMI: {max_diff:.5f}")
 
     if visualize:
         _fig, ax = plt.subplots(layout='constrained', dpi=300)
@@ -251,7 +258,8 @@ def test_mmi_matches_tidy3d():
         plt.show()
 
     if max_diff > 0.01:
-        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        error_msg = f"MEOW results do not closely match " \
+                    f"Tidy3D results. Max difference: {max_diff}"
         raise AssertionError(error_msg)
 
 def test_taper_matches_tidy3d():
@@ -356,6 +364,7 @@ def test_taper_matches_tidy3d():
         np.abs(np.array(output_mode_to_coupling_arr[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
     ])
     max_diff = np.max(np.abs(meow_tidy3d_diff))
+    logger.info(f"Max difference between MEOW and Tidy3D for taper: {max_diff:.5f}")
 
     if visualize:
         _fig, ax = plt.subplots(layout='constrained', dpi=300)
@@ -377,12 +386,16 @@ def test_taper_matches_tidy3d():
         plt.show()
 
     if max_diff > 0.01:
-        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        error_msg = f"MEOW results do not closely match " \
+                    f"Tidy3D results. Max difference: {max_diff}"
         raise AssertionError(error_msg)
 
 def test_bend_matches_tidy3d():
-    """Tests a circular bend. This makes 3 cells: one input cell that's straight, then one bent cell, then one straight cell.
-    This test examines the coupling to higher order modes after the bent region and compares to Tidy3D results.
+    """Tests a circular bend. This makes 3 cells:
+    one input cell that's straight, then one bent cell,
+    then one straight cell.
+    This test examines the coupling to higher order modes
+    after the bent region and compares to Tidy3D results.
 
     Args:
     Returns:
@@ -396,7 +409,6 @@ def test_bend_matches_tidy3d():
     num_sweep_points = 11
     bend_radius_arr = np.linspace(min_bend_radius, max_bend_radius, num_sweep_points)
 
-    num_cells = 3
     num_modes_arr = [1, 1, 5]
 
     # structure is just a straight waveguide
@@ -444,8 +456,11 @@ def test_bend_matches_tidy3d():
     # sweep bend radius
 
     modes_to_compare_and_plot = [0, 1, 2,]
-    # dict of lists. The dict key is the mode index, and the value is a list of couplings for that mode across different bend radii
-    mode_index_bend_radius_to_couplings: dict[list[float]] = {mode_index : [] for mode_index in modes_to_compare_and_plot}
+
+    # dict of lists. The dict key is the mode index,
+    # and the value is a list of couplings for that mode
+    # across different bend radii
+    mode_index_bend_radius_to_couplings: dict[int, list[float]] = {mode_index : [] for mode_index in modes_to_compare_and_plot}
 
     for bend_radius in bend_radius_arr:
         cells = []
@@ -483,9 +498,12 @@ def test_bend_matches_tidy3d():
                 mode_index_bend_radius_to_couplings[output_mode].append(None)
 
     meow_tidy3d_diff = np.max([
-        np.abs(np.array(mode_index_bend_radius_to_couplings[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
+        np.abs(
+            np.array(mode_index_bend_radius_to_couplings[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) \
+                for output_mode in modes_to_compare_and_plot
     ])
     max_diff = np.max(np.abs(meow_tidy3d_diff))
+    logger.info(f"Max difference between MEOW and Tidy3D for bend: {max_diff:.5f}")
 
     if visualize:
         import matplotlib.pyplot as plt
@@ -508,11 +526,13 @@ def test_bend_matches_tidy3d():
         plt.show()
 
     if max_diff > 0.01:
-        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        error_msg = f"MEOW results do not closely match " \
+                    f"Tidy3D results. Max difference: {max_diff}"
         raise AssertionError(error_msg)
 
 if __name__ == "__main__":
-    # if run with command line argument -visualize, visualize results. Else, time all results
+    # if run with command line argument -visualize,
+    # visualize results. Else, time all results
     import sys
     visualize = '-visualize' in sys.argv
     if visualize:
@@ -525,16 +545,20 @@ if __name__ == "__main__":
         import time
         start = time.time()
         test_evanescent_coupler_matches_tidy3d()
-        print(f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info(
+            f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
         test_mmi_matches_tidy3d()
-        print(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info(
+            f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
         test_taper_matches_tidy3d()
-        print(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info(
+            f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
         test_bend_matches_tidy3d()
-        print(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
+        logger.info(
+            f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
