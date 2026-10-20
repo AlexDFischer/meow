@@ -1,3 +1,4 @@
+from functools import partial
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -6,7 +7,7 @@ import meow as mw
 
 si = mw.TidyMaterial(name="cSi", variant="Li1993_293K")
 sio2 = mw.TidyMaterial(name="SiO2", variant="Palik_LowLoss")
-sin = mw.TidyMaterial(name="Si3N4", variant="Luke2015PMLStable")
+si_n = mw.TidyMaterial(name="Si3N4", variant="Luke2015PMLStable")
 env = mw.Environment(T=20, wl=1.55)
 
 def test_evanescent_coupler_matches_tidy3d(visualize: bool=False):
@@ -385,9 +386,155 @@ def test_taper_matches_tidy3d(visualize: bool=False):
     if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
         raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
 
+def test_bend_matches_tidy3d(visualize: bool=False):
+    """Tests a circular bend. This makes 3 cells: one input cell that's straight, then one bent cell, then one straight cell.
+    This test examines the coupling to higher order modes after the bent region and compares to Tidy3D results.
+
+    Args:
+        visualize (bool, optional): Whether to make plots visualizing the results. Defaults to False.
+    """
+    # load tidy3d results
+    tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_bend_data.csv"
+    tidy3d_results = pd.read_csv(tidy3d_results_fname)
+
+    min_bend_radius = 20
+    max_bend_radius = 40
+    num_sweep_points = 11
+    bend_radius_arr = np.linspace(min_bend_radius, max_bend_radius, num_sweep_points)
+
+    num_cells = 3
+    num_modes_arr = [1, 1, 5]
+
+    # structure is just a straight waveguide
+    # we manually modify the bend radius in each cell
+
+    waveguide_height = 0.5
+    waveguide_width = 2.0
+    waveguide_length = 3
+    cladding_buffer_horizontal = 2.0
+    cladding_buffer_vertical = 0.8
+    dl = 0.05
+
+    x_min = -waveguide_width / 2 - cladding_buffer_horizontal
+    x_max = +waveguide_width / 2 + cladding_buffer_horizontal
+    y_min = -waveguide_height / 2 - cladding_buffer_vertical
+    y_max = +waveguide_height / 2 + cladding_buffer_vertical
+
+    waveguide = mw.Structure(
+        material=si_n,
+        geometry=mw.Box(
+            x_min=-waveguide_width / 2,
+            x_max=+waveguide_width / 2,
+            y_min=-waveguide_height / 2,
+            y_max=+waveguide_height / 2,
+            z_min=0,
+            z_max=waveguide_length
+        ),
+        mesh_order=1
+    )
+    cladding = mw.Structure(
+        material=sio2,
+        geometry=mw.Box(
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+            z_min=0,
+            z_max=waveguide_length,
+        ),
+        mesh_order=2
+    )
+
+    cells = []
+
+    # sweep bend radius
+
+    modes_to_compare_and_plot = [0, 1, 2,]
+    # dict of lists. The dict key is the mode index, and the value is a list of couplings for that mode across different bend radii
+    mode_index_bend_radius_to_couplings: dict[list[float]] = {mode_index : [] for mode_index in modes_to_compare_and_plot}
+
+    for bend_radius in bend_radius_arr:
+        cells = []
+        for cell_bend_radius in [None, bend_radius, None]:
+            cells.append(
+                mw.Cell(
+                    structures=[waveguide, cladding],
+                    z_min=0,
+                    z_max=1,
+                    mesh=mw.Mesh2D(
+                        x=np.arange(x_min, x_max, dl),
+                        y=np.arange(y_min, y_max, dl),
+                        bend_radius=cell_bend_radius,
+                        bend_axis=1,
+                        num_pml=(10, 10),
+                    ),
+                )
+            )
+
+        xsecs = [mw.CrossSection.from_cell(cell=cell, env=env) for cell in cells]
+        modes = [mw.compute_modes(cs=xsec, num_modes=num_modes_arr[i]) for i, xsec in enumerate(xsecs)]
+
+        S_matrix, port_map = mw.compute_s_matrix(
+            modes=modes,
+            cells=cells,
+            interfaces_fn=partial(
+                mw.compute_interface_s_matrices,
+                passivity_method='clip',
+            ),
+        )
+        for output_mode in modes_to_compare_and_plot:
+            if len(S_matrix[0]) > 1 + output_mode:
+                mode_index_bend_radius_to_couplings[output_mode].append(np.abs(S_matrix[0][1 + output_mode])**2)
+            else:
+                mode_index_bend_radius_to_couplings[output_mode].append(None)
+
+    if visualize:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(layout='constrained', dpi=300)
+
+        for output_mode, coupling_arr in mode_index_bend_radius_to_couplings.items():
+            ax.plot(tidy3d_results.bend_radius,
+                    tidy3d_results[f'coupling_0{output_mode}'],
+                    label=f"Mode 0 -> {output_mode} coupling (Tidy3D)",
+                    linestyle="dotted", linewidth=2)
+            ax.plot(bend_radius_arr,
+                    coupling_arr,
+                    label=f"Mode 0 -> {output_mode} coupling (MEOW)",
+                    linestyle="solid",
+                    linewidth=0.5)
+        ax.legend()
+        ax.set_xlabel("Bend radius (um)")
+        ax.set_ylabel("Coupling to output modes")
+        ax.set_title("Coupling vs bend radius")
+        plt.show()
+
+    meow_tidy3d_diff = np.max([
+        np.abs(np.array(mode_index_bend_radius_to_couplings[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
+    ])
+
+    if visualize:
+        print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
+
+    if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
+        raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
 
 if __name__ == "__main__":
     # If we're running this test from the command line, visualize results
-    test_evanescent_coupler_matches_tidy3d(visualize=True)
-    test_mmi_matches_tidy3d(visualize=True)
-    test_taper_matches_tidy3d(visualize=True)
+    
+    # time all tests individually
+    import time
+    start = time.time()
+    test_evanescent_coupler_matches_tidy3d(visualize=False)
+    print(f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
+
+    start = time.time()
+    test_mmi_matches_tidy3d(visualize=False)
+    print(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
+
+    start = time.time()
+    test_taper_matches_tidy3d(visualize=False)
+    print(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
+
+    start = time.time()
+    test_bend_matches_tidy3d(visualize=False)
+    print(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
