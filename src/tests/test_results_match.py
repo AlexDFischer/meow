@@ -74,7 +74,7 @@ def test_evanescent_coupler_matches_tidy3d(visualize: bool=False):
     cells = mw.create_cells(
         structures=structures,
         mesh=mesh,
-        Ls=[1, 1, 1],
+        Ls=np.array([1, 1, 1]),
         z_min=0,
     )
 
@@ -126,9 +126,9 @@ def test_mmi_matches_tidy3d(visualize: bool=False):
     width_mmi = 8.0
     length_mmi = 57.5
     waveguide_width = 1.5
-    cladding_buffer = 1.5
+    cladding_buffer = 1.0
     output_waveguide_offset = 2.0
-    dl = 0.010
+    dl = 0.020
 
     x_min = -width_mmi / 2 - cladding_buffer
     x_max = +width_mmi / 2 + cladding_buffer
@@ -204,7 +204,7 @@ def test_mmi_matches_tidy3d(visualize: bool=False):
             x=np.arange(x_min, x_max, dl),
             y=np.arange(y_min, y_max, dl),
         ),
-        Ls=[1, length_mmi, 1],
+        Ls=np.array([1, length_mmi, 1]),
         z_min=0,
     )
 
@@ -267,8 +267,8 @@ def test_taper_matches_tidy3d(visualize: bool=False):
     waveguide_width_start = 0.45
     waveguide_width_end = 1.5
     taper_length = 20.0
-    cladding_buffer = 1.5
-    dl = 0.02
+    cladding_buffer = 1.0
+    dl = 0.020
 
     x_min = -waveguide_width_end / 2 - cladding_buffer
     x_max = +waveguide_width_end / 2 + cladding_buffer
@@ -276,7 +276,7 @@ def test_taper_matches_tidy3d(visualize: bool=False):
     y_max = +silicon_height / 2 + cladding_buffer
 
     num_cells = 30
-    num_modes_per_cell = 9
+    num_modes_per_cell = 5
 
     structures = [
                 mw.Structure( # cladding
@@ -318,7 +318,7 @@ def test_taper_matches_tidy3d(visualize: bool=False):
             x=np.arange(x_min, x_max, dl),
             y=np.arange(y_min, y_max, dl),
         ),
-        Ls=[taper_length / num_cells for _ in range(num_cells)],
+        Ls=np.array([taper_length / num_cells for _ in range(num_cells)]),
         z_min=0,
     )
 
@@ -519,22 +519,29 @@ def test_bend_matches_tidy3d(visualize: bool=False):
         raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
 
 if __name__ == "__main__":
-    # If we're running this test from the command line, visualize results
-    
-    # time all tests individually
-    import time
-    start = time.time()
-    test_evanescent_coupler_matches_tidy3d(visualize=False)
-    print(f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
+    # if run with command line argument -visualize, visualize results. Else, time all results
+    import sys
+    visualize = '-visualize' in sys.argv
+    if visualize:
+        test_evanescent_coupler_matches_tidy3d(visualize=True)
+        test_mmi_matches_tidy3d(visualize=True)
+        test_taper_matches_tidy3d(visualize=True)
+        test_bend_matches_tidy3d(visualize=True)
+    else:
+        # time all tests individually
+        import time
+        start = time.time()
+        test_evanescent_coupler_matches_tidy3d(visualize=False)
+        print(f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
 
-    start = time.time()
-    test_mmi_matches_tidy3d(visualize=False)
-    print(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
+        start = time.time()
+        test_mmi_matches_tidy3d(visualize=False)
+        print(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
 
-    start = time.time()
-    test_taper_matches_tidy3d(visualize=False)
-    print(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
+        start = time.time()
+        test_taper_matches_tidy3d(visualize=False)
+        print(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
 
-    start = time.time()
-    test_bend_matches_tidy3d(visualize=False)
-    print(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
+        start = time.time()
+        test_bend_matches_tidy3d(visualize=False)
+        print(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
