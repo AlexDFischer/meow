@@ -10,7 +10,9 @@ sio2 = mw.TidyMaterial(name="SiO2", variant="Palik_LowLoss")
 si_n = mw.TidyMaterial(name="Si3N4", variant="Luke2015PMLStable")
 env = mw.Environment(T=20, wl=1.55)
 
-def test_evanescent_coupler_matches_tidy3d(visualize: bool=False):
+visualize = False # Set to True to visualize results
+
+def test_evanescent_coupler_matches_tidy3d():
     # load tidy3d results
     tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_evanescent_coupler_data.csv"
     tidy3d_results = pd.read_csv(tidy3d_results_fname)
@@ -82,7 +84,7 @@ def test_evanescent_coupler_matches_tidy3d(visualize: bool=False):
     num_modes = [1, 2, 1]  # number of modes to compute for each cross-section
     modes = [mw.compute_modes(cs=xsec, num_modes=num_modes[i]) for i, xsec in enumerate(xsecs)]
 
-    S_matrix, port_map = mw.compute_s_matrix(modes=modes,
+    S_matrix, _port_map = mw.compute_s_matrix(modes=modes,
                         cells=cells)
 
     interaction_length_arr = np.linspace(0, 50, 100)
@@ -90,32 +92,30 @@ def test_evanescent_coupler_matches_tidy3d(visualize: bool=False):
     coupling_00_arr = []
 
     for cell_lengths in cell_lengths_arr:
-        S_matrix, port_map = mw.compute_s_matrix(modes=modes, cell_lengths=cell_lengths)
+        S_matrix, _port_map = mw.compute_s_matrix(modes=modes, cell_lengths=cell_lengths)
         coupling_00_arr.append(np.abs(S_matrix[0][1])**2)
 
+    meow_tidy3d_diff = np.abs(np.array(coupling_00_arr) - tidy3d_results.coupling_00)
+    max_diff = np.max(np.abs(meow_tidy3d_diff))
+
     if visualize:
-        import matplotlib
         from matplotlib import pyplot as plt
 
-        fig, ax = plt.subplots(layout='constrained', dpi=300)
+        _fig, ax = plt.subplots(layout='constrained', dpi=300)
 
         ax.plot(tidy3d_results.length, tidy3d_results.coupling_00, label="Coupling (Tidy3D)", linestyle="dotted", linewidth=2)
         ax.plot(interaction_length_arr, coupling_00_arr, label="Coupling (MEOW)", linestyle="solid", linewidth=0.5)
         ax.legend()
         ax.set_xlabel("Interaction length (um)")
         ax.set_ylabel("Coupling")
-        ax.set_title("Coupling vs interaction length")
+        ax.set_title(f"Coupling vs interaction length. Max diff {max_diff:.5f}")
         plt.show()
 
-    meow_tidy3d_diff = np.abs(np.array(coupling_00_arr) - tidy3d_results.coupling_00)
+    if max_diff > 0.01:
+        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        raise AssertionError(error_msg)
 
-    if visualize:
-        print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
-
-    if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
-        raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
-
-def test_mmi_matches_tidy3d(visualize: bool=False):
+def test_mmi_matches_tidy3d():
     # load tidy3d results
     tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_mmi_data.csv"
     tidy3d_results = pd.read_csv(tidy3d_results_fname)
@@ -214,7 +214,6 @@ def test_mmi_matches_tidy3d(visualize: bool=False):
     modes = [mw.compute_modes(cs=xsec, num_modes=num_modes[i]) for i, xsec in enumerate(xsecs)]
 
     if visualize:
-        import matplotlib
         from matplotlib import pyplot as plt
 
         mw.visualize(modes[2][0], fields=['Ex'], operation=np.real)
@@ -222,7 +221,7 @@ def test_mmi_matches_tidy3d(visualize: bool=False):
         z_arr = np.linspace(0, length_mmi + 2, 1000)
         field, x = mw.propagate_modes(modes, cells, y=0, z=z_arr)
 
-        fig, ax = plt.subplots(figsize=(10, 4))
+        _fig, ax = plt.subplots(figsize=(10, 4))
         im = ax.pcolormesh(z_arr, x, np.abs(field).T, shading="auto", cmap="magma")
         ax.set_xlabel("z [um]")
         ax.set_ylabel("x [um]")
@@ -234,29 +233,28 @@ def test_mmi_matches_tidy3d(visualize: bool=False):
     output_coupling_symmetric_mode_arr = []
     length_arr = np.linspace(40, 80, 100)
     for length in length_arr:
-        S_matrix, port_map = mw.compute_s_matrix(modes=modes, cell_lengths=[1, length, 1])
+        S_matrix, _port_map = mw.compute_s_matrix(modes=modes, cell_lengths=[1, length, 1])
         output_coupling_symmetric_mode_arr.append(np.abs(S_matrix[0][1])**2)
 
+    meow_tidy3d_diff = np.abs(np.array(output_coupling_symmetric_mode_arr) - tidy3d_results.coupling_00)
+    max_diff = np.max(np.abs(meow_tidy3d_diff))
+
     if visualize:
-        fig, ax = plt.subplots(layout='constrained', dpi=300)
+        _fig, ax = plt.subplots(layout='constrained', dpi=300)
 
         ax.plot(tidy3d_results.length, tidy3d_results.coupling_00, label="Coupling (Tidy3D)", linestyle="dotted", linewidth=2)
         ax.plot(length_arr, output_coupling_symmetric_mode_arr, label="Coupling (MEOW)", linestyle="solid", linewidth=0.5)
         ax.legend()
         ax.set_xlabel("MMI length (um)")
         ax.set_ylabel("Coupling to symmetric output mode")
-        ax.set_title("Coupling vs MMI length")
+        ax.set_title(f"Coupling vs MMI length. Max diff {max_diff:.5f}")
         plt.show()
 
-    meow_tidy3d_diff = np.abs(np.array(output_coupling_symmetric_mode_arr) - tidy3d_results.coupling_00)
+    if max_diff > 0.01:
+        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        raise AssertionError(error_msg)
 
-    if visualize:
-        print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
-
-    if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
-        raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
-
-def test_taper_matches_tidy3d(visualize: bool=False):
+def test_taper_matches_tidy3d():
     # load tidy3d results
     tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_taper_data.csv"
     tidy3d_results = pd.read_csv(tidy3d_results_fname)
@@ -323,21 +321,21 @@ def test_taper_matches_tidy3d(visualize: bool=False):
     )
 
     xsecs = [mw.CrossSection.from_cell(cell=cell, env=env) for cell in cells]
-    num_modes = [1]
-    num_modes.extend([num_modes_per_cell] * (num_cells - 1))
+    num_modes = [1] + [num_modes_per_cell] * (num_cells - 1)
     modes = [mw.compute_modes(cs=xsec, num_modes=num_modes[i]) for i, xsec in enumerate(xsecs)]
 
-    modes_to_compare_and_plot = [0, 2, 4] # only plot even modes, as those are the only ones that should couple to the even fundamental mode that we excite
+    # only plot even modes, as those are the only ones that
+    # should couple to the even fundamental mode that we excite
+    modes_to_compare_and_plot = [0, 2, 4]
 
     if visualize:
         # visualize propagation
-        import matplotlib
         from matplotlib import pyplot as plt
 
         z_arr = np.linspace(0, taper_length, 500)
         field, x = mw.propagate_modes(modes, cells, y=0, z=z_arr)
 
-        fig, ax = plt.subplots(figsize=(10, 4))
+        _fig, ax = plt.subplots(figsize=(10, 4))
         im = ax.pcolormesh(z_arr, x, np.abs(field).T, shading="auto", cmap="magma")
         ax.set_xlabel("z [um]")
         ax.set_ylabel("x [um]")
@@ -346,19 +344,21 @@ def test_taper_matches_tidy3d(visualize: bool=False):
         plt.tight_layout()
         plt.show()
 
-    output_mode_to_coupling_arr = {}
-
-    for output_mode in modes_to_compare_and_plot:
-        output_mode_to_coupling_arr[output_mode] = []
+    output_mode_to_coupling_arr = {output_mode: [] for output_mode in modes_to_compare_and_plot}
 
     length_arr = np.linspace(0, 10, 45)
     for length in length_arr:
-        S_matrix, port_map = mw.compute_s_matrix(modes=modes, cell_lengths=[length / num_cells for _ in range(num_cells)])
+        S_matrix, _port_map = mw.compute_s_matrix(modes=modes, cell_lengths=[length / num_cells for _ in range(num_cells)])
         for output_mode in modes_to_compare_and_plot:
             output_mode_to_coupling_arr[output_mode].append(np.abs(S_matrix[0][1 + output_mode])**2)
 
+    meow_tidy3d_diff = np.max([
+        np.abs(np.array(output_mode_to_coupling_arr[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
+    ])
+    max_diff = np.max(np.abs(meow_tidy3d_diff))
+
     if visualize:
-        fig, ax = plt.subplots(layout='constrained', dpi=300)
+        _fig, ax = plt.subplots(layout='constrained', dpi=300)
 
         for output_mode, coupling_arr in output_mode_to_coupling_arr.items():
             ax.plot(tidy3d_results.length,
@@ -373,27 +373,21 @@ def test_taper_matches_tidy3d(visualize: bool=False):
         ax.legend()
         ax.set_xlabel("Taper length (um)")
         ax.set_ylabel("Coupling to output modes")
-        ax.set_title("Coupling vs taper length")
+        ax.set_title(f"Coupling vs taper length. Max diff {max_diff:.5f}")
         plt.show()
 
-    meow_tidy3d_diff = np.max([
-        np.abs(np.array(output_mode_to_coupling_arr[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
-    ])
+    if max_diff > 0.01:
+        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        raise AssertionError(error_msg)
 
-    if visualize:
-        print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
-
-    if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
-        raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
-
-def test_bend_matches_tidy3d(visualize: bool=False):
+def test_bend_matches_tidy3d():
     """Tests a circular bend. This makes 3 cells: one input cell that's straight, then one bent cell, then one straight cell.
     This test examines the coupling to higher order modes after the bent region and compares to Tidy3D results.
 
     Args:
-        visualize (bool, optional): Whether to make plots visualizing the results. Defaults to False.
+    Returns:
+        None
     """
-    # load tidy3d results
     tidy3d_results_fname = Path(__file__).resolve().parent / "assets" / "tidy3d_bend_data.csv"
     tidy3d_results = pd.read_csv(tidy3d_results_fname)
 
@@ -474,7 +468,7 @@ def test_bend_matches_tidy3d(visualize: bool=False):
         xsecs = [mw.CrossSection.from_cell(cell=cell, env=env) for cell in cells]
         modes = [mw.compute_modes(cs=xsec, num_modes=num_modes_arr[i]) for i, xsec in enumerate(xsecs)]
 
-        S_matrix, port_map = mw.compute_s_matrix(
+        S_matrix, _port_map = mw.compute_s_matrix(
             modes=modes,
             cells=cells,
             interfaces_fn=partial(
@@ -488,9 +482,14 @@ def test_bend_matches_tidy3d(visualize: bool=False):
             else:
                 mode_index_bend_radius_to_couplings[output_mode].append(None)
 
+    meow_tidy3d_diff = np.max([
+        np.abs(np.array(mode_index_bend_radius_to_couplings[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
+    ])
+    max_diff = np.max(np.abs(meow_tidy3d_diff))
+
     if visualize:
         import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(layout='constrained', dpi=300)
+        _fig, ax = plt.subplots(layout='constrained', dpi=300)
 
         for output_mode, coupling_arr in mode_index_bend_radius_to_couplings.items():
             ax.plot(tidy3d_results.bend_radius,
@@ -505,43 +504,37 @@ def test_bend_matches_tidy3d(visualize: bool=False):
         ax.legend()
         ax.set_xlabel("Bend radius (um)")
         ax.set_ylabel("Coupling to output modes")
-        ax.set_title("Coupling vs bend radius")
+        ax.set_title(f"Coupling vs bend radius. Max difference: {max_diff:.5f}")
         plt.show()
 
-    meow_tidy3d_diff = np.max([
-        np.abs(np.array(mode_index_bend_radius_to_couplings[output_mode]) - tidy3d_results[f'coupling_0{output_mode}']) for output_mode in modes_to_compare_and_plot
-    ])
-
-    if visualize:
-        print(f"Max difference between MEOW and Tidy3D results: {np.max(np.abs(meow_tidy3d_diff))}")
-
-    if np.max(np.abs(meow_tidy3d_diff)) > 0.01:
-        raise AssertionError(f"MEOW results do not closely match Tidy3D results. Max difference: {np.max(np.abs(meow_tidy3d_diff))}")
+    if max_diff > 0.01:
+        error_msg = f"MEOW results do not closely match Tidy3D results. Max difference: {max_diff}"
+        raise AssertionError(error_msg)
 
 if __name__ == "__main__":
     # if run with command line argument -visualize, visualize results. Else, time all results
     import sys
     visualize = '-visualize' in sys.argv
     if visualize:
-        test_evanescent_coupler_matches_tidy3d(visualize=True)
-        test_mmi_matches_tidy3d(visualize=True)
-        test_taper_matches_tidy3d(visualize=True)
-        test_bend_matches_tidy3d(visualize=True)
+        test_evanescent_coupler_matches_tidy3d()
+        test_mmi_matches_tidy3d()
+        test_taper_matches_tidy3d()
+        test_bend_matches_tidy3d()
     else:
         # time all tests individually
         import time
         start = time.time()
-        test_evanescent_coupler_matches_tidy3d(visualize=False)
+        test_evanescent_coupler_matches_tidy3d()
         print(f"test_evanescent_coupler_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
-        test_mmi_matches_tidy3d(visualize=False)
+        test_mmi_matches_tidy3d()
         print(f"test_mmi_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
-        test_taper_matches_tidy3d(visualize=False)
+        test_taper_matches_tidy3d()
         print(f"test_taper_matches_tidy3d took {time.time() - start:.2f} seconds")
 
         start = time.time()
-        test_bend_matches_tidy3d(visualize=False)
+        test_bend_matches_tidy3d()
         print(f"test_bend_matches_tidy3d took {time.time() - start:.2f} seconds")
