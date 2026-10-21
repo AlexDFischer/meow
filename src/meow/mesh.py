@@ -66,6 +66,18 @@ class Mesh2D(BaseModel):
         description="Number of standard pml layers to add in the two tangential axes.",
     )
 
+    def model_post_init(self, context) -> None:
+        super().model_post_init(context)
+
+        x_diff = self.x[1:] - self.x[:-1]
+        if (x_diff <= 0).any():
+            raise ValueError("x coordinates must be strictly increasing")
+        
+        y_diff = self.y[1:] - self.y[:-1]
+        if (y_diff <= 0).any():
+            raise ValueError("y coordinates must be strictly increasing")
+        
+
     @cached_property
     def dx(self) -> FloatArray1D:
         """dx at Hz locations, i.e. center of the 2D cell."""
