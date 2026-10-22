@@ -19,7 +19,7 @@ from meow.cell import (
     sort_structures,
 )
 from meow.environment import Environment
-from meow.materials import Material
+from meow.materials import Material, ComponentType
 from meow.mesh import Mesh2D
 from meow.structures import Structure2D
 
@@ -75,11 +75,11 @@ class CrossSection(BaseModel):
         return _create_full_material_array(self.mesh, self.structures, self.materials)
 
     @cached_property
-    def n_full(self) -> ComplexArray2D:
+    def n_full(self, component: ComponentType="x") -> ComplexArray2D:
         """Return the refractive index array for the full mesh."""
         n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
         for material, idx in self.materials.items():
-            n_full = np.where(self._m_full == idx, material(self.env), n_full)
+            n_full = np.where(self._m_full == idx, material(self.env, component=component), n_full)
         return n_full
 
     @cached_property
@@ -183,7 +183,7 @@ _COMPONENT_SLICES = {
 
 def _dual_cell_bounds(
     mesh: Mesh2D,
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute (x_lo, x_hi, y_lo, y_hi) for the dual cells of a field component.
 
@@ -236,7 +236,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     materials: dict[Material, int],
     env: Environment,
     structures: list[Structure2D],
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> ComplexArray2D:
     """Compute subpixel-smoothed refractive index for a field component.
 
@@ -253,7 +253,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     eps = np.full_like(m_comp, env_eps, dtype=np.complex128)
     mat_eps: dict[int, complex] = {0: env_eps}
     for material, idx in materials.items():
-        n_val = material(env)
+        n_val = material(env, component=component)
         e = np.complex128(n_val) ** 2
         eps[m_comp == idx] = e
         mat_eps[idx] = e
@@ -358,7 +358,7 @@ def _compute_winner_takes_all_n(
     materials: dict[Material, int],
     env: Environment,
     structures: list[Structure2D],
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> ComplexArray2D:
     """Compute refractive index using winner-takes-all (no subpixel smoothing).
 
@@ -376,7 +376,7 @@ def _compute_winner_takes_all_n(
     eps = np.full_like(m_comp, env_eps, dtype=np.complex128)
     mat_eps: dict[int, complex] = {0: env_eps}
     for material, idx in materials.items():
-        n_val = material(env)
+        n_val = material(env, component=component)
         e = np.complex128(n_val) ** 2
         eps[m_comp == idx] = e
         mat_eps[idx] = e
