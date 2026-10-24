@@ -7,7 +7,7 @@ from typing import Any, Literal, Self
 import numpy as np
 import shapely
 from pydantic import Field
-from pydantic.v1 import PrivateAttr
+from pydantic import PrivateAttr
 from shapely.ops import unary_union
 
 from meow.arrays import ComplexArray2D, IntArray2D
@@ -42,6 +42,7 @@ class CrossSection(BaseModel):
         description="use subpixel smoothing at interfaces; if False: winner-takes-all",
     )
     _cell: Cell | None = PrivateAttr(default=None)
+    _n_full_cache: dict[ComponentType, ComplexArray2D] = PrivateAttr(default_factory=dict)
 
     @classmethod
     def from_cell(
@@ -52,13 +53,14 @@ class CrossSection(BaseModel):
         subpixel_smoothing: bool = True,
     ) -> Self:
         """Create a CrossSection from a Cell and Environment."""
-        return cls(
+        result = cls(
             structures=cell.structures_2d,
             mesh=cell.mesh,
             env=env,
             subpixel_smoothing=subpixel_smoothing,
-            _cell=cell,
         )
+        result._cell=cell
+        return result
 
     @cached_property
     def materials(self) -> dict[Material, int]:
@@ -74,17 +76,22 @@ class CrossSection(BaseModel):
         """Return the material index array for the full mesh."""
         return _create_full_material_array(self.mesh, self.structures, self.materials)
 
-    @cached_property
     def n_full(self, component: ComponentType="x") -> ComplexArray2D:
-        """Return the refractive index array for the full mesh."""
-        n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
-        for material, idx in self.materials.items():
-            n_full = np.where(self._m_full == idx, material(self.env, component=component), n_full)
-        return n_full
+        """Return the refractive index (along the given axis) for the full mesh."""
+        # check if n_full for this component exists in cache
+        if component in self._n_full_cache:
+            return self._n_full_cache[component]
+        else:
+            n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
+            for material, idx in self.materials.items():
+                n_full = np.where(self._m_full == idx, material(self.env, component=component), n_full)
+            self._n_full_cache[component] = n_full
+            return n_full
 
     @cached_property
     def nx(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ex positions."""
+        """Return the smoothed refractive index (associated with the x direction)
+        on the Ex positions."""
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "x"
@@ -95,7 +102,8 @@ class CrossSection(BaseModel):
 
     @cached_property
     def ny(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ey positions."""
+        """Return the smoothed refractive index (associated with the y direction)
+        on the Ey positions."""
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "y"
@@ -106,7 +114,8 @@ class CrossSection(BaseModel):
 
     @cached_property
     def nz(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ez positions."""
+        """Return the smoothed refractive index (associated with the z direction)
+        on the Ez positions."""
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "z"
@@ -122,6 +131,7 @@ class CrossSection(BaseModel):
         n_cmap: Any = None,
         cbar: bool = True,
         show: bool = True,
+        index_component: ComponentType = "x",
         **ignored: Any,
     ) -> None:
         import matplotlib.pyplot as plt  # fmt: skip
@@ -137,7 +147,7 @@ class CrossSection(BaseModel):
             plt.sca(ax)
         else:
             ax = plt.gca()
-        n_full = np.real(self.n_full).copy()
+        n_full = np.real(self.n_full(component=index_component)).copy()
         n_full[0, 0] = 1.0
         plt.pcolormesh(self.mesh.X_full, self.mesh.Y_full, n_full, cmap=n_cmap)
         plt.axis("scaled")
@@ -161,9 +171,9 @@ class CrossSection(BaseModel):
         if cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
-            values = np.unique(np.real(self.n_full))
+            values = np.unique(np.real(n_full))
             _cbar = plt.colorbar(ticks=values, cax=cax)
-            # material_names = ['air'] + [mat.name for mat in self.cell.materials]
+            # material_names = ['vacuum'] + [mat.name for mat in self.cell.materials]
             # labels = [f"\n{n}\n{v:.3f}" for n, v in zip(material_names, values)]
             labels = [f"{v:.3f}" for v in values]
             _cbar.ax.set_yticklabels(labels, rotation=90, va="center", ha="center")
@@ -249,7 +259,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     m_comp = m_full[si, sj]
 
     # Build eps array from material indices
-    env_eps = np.complex128(1.0) ** 2  # background: air (n=1)
+    env_eps = np.complex128(1.0) ** 2  # background: vacuum (n=1)
     eps = np.full_like(m_comp, env_eps, dtype=np.complex128)
     mat_eps: dict[int, complex] = {0: env_eps}
     for material, idx in materials.items():
@@ -298,7 +308,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     # Clip accumulated area to avoid tiny numerical overshoots > 1.
     total_struct_fraction = np.clip(total_struct_fraction, 0.0, 1.0)
 
-    # Background (air) gets the remainder.
+    # Background (vacuum) gets the remainder.
     fractions[0] = np.maximum(1.0 - total_struct_fraction, 0.0)
 
     # Determine interface orientation

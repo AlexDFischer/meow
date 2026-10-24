@@ -74,13 +74,14 @@ class TidyMaterial(MaterialBase):
     variant: str = Field(description="The material variant as also used by tidy3d")
     optical_axis: ComponentType | None = Field(
         default=None,
-        description="The optical axis along which to align the material's crystal axes. " \
+        description="The optical axis (axis with extraordinary refractive index). " \
         "Required for anisotropic materials. Can be None for isotropic materials"
     )
     ignore_off_diagonal_permittivity: bool = Field(
         default=False,
-        description="Whether to ignore the off-diagonal elements of the permittivity tensor." \
-        "If False (default), ValueError is raised when off-diagonal elements are present."
+        description="Whether to ignore off-diagonal elements of the permittivity tensor. " \
+        "If False (default), ValueError is raised when off-diagonal elements are present. " \
+        "Currently, only diagonal (along x, y, z axes) anisotropy is supported."
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -120,7 +121,7 @@ class TidyMaterial(MaterialBase):
         if callable(material):
             material_along_axis = material(component_str_to_int[self.optical_axis])
             if not self.ignore_off_diagonal_permittivity:
-                self._ensure_no_off_diagonal(material_along_axis)
+                self._ensure_no_off_diagonal(material_along_axis, freq=td.C_0 / env.wl)
             eps_comp = getattr(
                 material_along_axis,
                 "eps_comp",
@@ -138,14 +139,15 @@ class TidyMaterial(MaterialBase):
         eps = eps_comp(component_str_to_int[component], component_str_to_int[component], td.C_0 / env.wl)
         return np.sqrt(eps)
 
-    def _ensure_no_off_diagonal(self, tidy3d_medium: AbstractMedium) -> None:
-        """Ensure the material has no off-diagonal permittivity components."""
+    def _ensure_no_off_diagonal(self, tidy3d_medium: AbstractMedium, freq: float) -> None:
+        """Ensure the material has no off-diagonal permittivity components at the given frequency."""
         for i in range(3):
             for j in range(3):
-                if i != j and tidy3d_medium.eps_comp(i, j, 0) != 0:
+                if i != j and tidy3d_medium.eps_comp(i, j, freq) != 0:
                     raise ValueError(
-                        f"Tidy3D material '{self.name}' variant '{self.variant}' "
-                        "has off-diagonal permittivity components."
+                        f"Tidy3D material '{self.name}' variant '{self.variant}' " \
+                        "has off-diagonal permittivity components. Currently, " \
+                        "only diagonal (along x, y, z axes) anisotropy is supported."
                     )
 
 
@@ -162,9 +164,9 @@ class IndexMaterial(MaterialBase):
 class AnisotropicIndexMaterial(MaterialBase):
     """A material with a constant anisotropic refractive index."""
 
-    nx: complex = Field(description="the refractive index along the x component")
-    ny: complex = Field(description="the refractive index along the y component")
-    nz: complex = Field(description="the refractive index along the z component")
+    nx: complex = Field(description="refractive index along the x component")
+    ny: complex = Field(description="refractive index along the y component")
+    nz: complex = Field(description="refractive index along the z component")
 
     def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:  # noqa: ARG002
         """Get the refractive index of the material for the given environment,
