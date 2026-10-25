@@ -12,6 +12,7 @@ from typing import Any, Literal, TypeAlias, cast
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colors
+from matplotlib.typing import ColorType
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pydantic import Field
 from scipy.constants import epsilon_0 as eps0
@@ -21,6 +22,7 @@ from meow.arrays import Complex, ComplexArray2D, FloatArray2D
 from meow.base_model import BaseModel, cached_property
 from meow.cross_section import CrossSection
 from meow.environment import Environment
+from meow.geometries import Polygon2D, Rectangle
 from meow.mesh import Mesh2D
 
 
@@ -114,9 +116,16 @@ class Mode(BaseModel):
         title_prefix: str = "",
         fields: tuple[str, ...] = ("Ex",),
         ax: Any = None,
-        n_cmap: str | colors.LinearSegmentedColormap | None = None,
-        mode_cmap: str | None = None,
-        num_levels: int = 8,
+        plot_cross_section: bool = True,
+        cross_section_cmap: str | colors.LinearSegmentedColormap | None = None,
+        plot_mode_contours: bool = True,
+        mode_contours_cmap: str | None = None,
+        num_contour_levels: int = 8,
+        plot_mode_image: bool = False,
+        mode_image_cmap: str | None = None,
+        mode_image_alpha: float = 0.5,
+        plot_structure_boundaries: bool = False,
+        structure_boundaries_color: ColorType = "black",
         operation: Callable = _power,
         show: bool = True,
         **_: Any,
@@ -147,9 +156,16 @@ class Mode(BaseModel):
                     title_prefix=title_prefix,
                     fields=(field,),
                     ax=ax_,
-                    n_cmap=n_cmap,
-                    mode_cmap=mode_cmap,
-                    num_levels=num_levels,
+                    plot_cross_section=plot_cross_section,
+                    cross_section_cmap=cross_section_cmap,
+                    plot_mode_contours=plot_mode_contours,
+                    mode_contours_cmap=mode_contours_cmap,
+                    num_contour_levels=num_contour_levels,
+                    plot_mode_image=plot_mode_image,
+                    mode_image_cmap=mode_image_cmap,
+                    mode_image_alpha=mode_image_alpha,
+                    plot_structure_boundaries=plot_structure_boundaries,
+                    structure_boundaries_color=structure_boundaries_color,
                     operation=operation,
                     show=False,
                 )
@@ -167,12 +183,32 @@ class Mode(BaseModel):
             ax = plt.gca()
         plt.sca(ax)
 
-        if n_cmap is None:
-            # little bit lighter colored than the one in cs._visualize:
-            n_cmap = colors.LinearSegmentedColormap.from_list(
-                name="c_cmap", colors=["#ffffff", "#c1d9ed"]
-            )
-        self.cs._visualize(ax=ax, n_cmap=n_cmap, cbar=False, show=False)
+        # first, plot cross section
+
+        if plot_cross_section:
+            if cross_section_cmap is None:
+                # little bit lighter colored than the one in cs._visualize:
+                cross_section_cmap = colors.LinearSegmentedColormap.from_list(
+                    name="c_cmap", colors=["#ffffff", "#c1d9ed"]
+                )
+            self.cs._visualize(ax=ax, n_cmap=cross_section_cmap, cbar=False, show=False)
+
+        # draw structure boundaries
+        if plot_structure_boundaries:
+            for structure in self.cs.structures:
+                geometry = structure.geometry
+                if isinstance(geometry, Polygon2D):
+                    msg = "Polygon2D not supported yet"
+                    raise NotImplementedError(msg)
+                    # TODO: implement polygon drawing
+                if isinstance(geometry, Rectangle):
+                    msg = "Rectangle not supported yet"
+                    raise NotImplementedError(msg)
+                    # TODO: implement rectangle drawing
+                msg = f"Unsupported geometry type: {type(geometry)}"
+                raise NotImplementedError(msg)
+
+        # plot mode image and contours
 
         x, y = "x", "y"  # currently only propagation in z supported, see Mesh2D
         c = {
@@ -186,20 +222,33 @@ class Mode(BaseModel):
             "Py": "y",
             "Pz": "z",
         }[field]
-        if mode_cmap is None:
-            mode_cmap = "inferno"
         X = getattr(self.mesh, f"X{c}")
         Y = getattr(self.mesh, f"Y{c}")
         mode = operation(getattr(self, field))
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
-            levels = np.linspace(mode.min(), mode.max(), num_levels + 1)[1:]
-            plt.contour(X, Y, mode, cmap=mode_cmap, levels=levels)
-            # plt.pcolormesh(X, Y, mode, cmap=mode_cmap, alpha=0.5) #, levels=levels)
+            levels = np.linspace(mode.min(), mode.max(), num_contour_levels + 1)[1:]
+
+            if plot_mode_image:
+                if mode_image_cmap is None:
+                    mode_image_cmap = "rainbow"
+                plt.pcolormesh(
+                    X, Y, mode, cmap=mode_image_cmap, alpha=mode_image_alpha
+                )  # , levels=levels)
+
+            if plot_mode_contours:
+                if mode_contours_cmap is None:
+                    mode_contours_cmap = "inferno"
+                plt.contour(X, Y, mode, cmap=mode_contours_cmap, levels=levels)
+
+        # colorbar on right
+
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         plt.colorbar(cax=cax)
         plt.sca(ax)
+
+        # labels
 
         plt.xlabel(x)
         plt.ylabel(y)
@@ -316,7 +365,7 @@ def zero_phase(mode: Mode) -> Mode:
         Hy=mode.Hy * phase,
         Hz=mode.Hz * phase,
     )
-    if _sum_around(np.real(new_mode.Hx), int(m), int(n)) < 0:
+    if _sum_around(np.real(new_mode.Ex), int(m), int(n)) < 0:
         new_mode = invert_mode(new_mode)
     return new_mode
 

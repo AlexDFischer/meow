@@ -145,9 +145,9 @@ def _visualize_overlap_density(
         title=f"mode 1: {field}",
         fields=(field,),
         ax=ax[0],
-        n_cmap=n_cmap,
-        mode_cmap=mode_cmap,
-        num_levels=num_levels,
+        cross_section_cmap=n_cmap,
+        mode_contours_cmap=mode_cmap,
+        num_contour_levels=num_levels,
         show=False,
     )
 
@@ -156,9 +156,9 @@ def _visualize_overlap_density(
         title=f"mode 2: {field}",
         fields=(field,),
         ax=ax[1],
-        n_cmap=n_cmap,
-        mode_cmap=mode_cmap,
-        num_levels=num_levels,
+        cross_section_cmap=n_cmap,
+        mode_contours_cmap=mode_cmap,
+        num_contour_levels=num_levels,
         show=False,
     )
 
@@ -167,9 +167,9 @@ def _visualize_overlap_density(
         title=title,
         fields=("Ex",),
         ax=ax[2],
-        n_cmap=n_cmap,
-        mode_cmap=mode_cmap,
-        num_levels=num_levels,
+        cross_section_cmap=n_cmap,
+        mode_contours_cmap=mode_cmap,
+        num_contour_levels=num_levels,
         show=False,
     )
 
@@ -237,9 +237,9 @@ def _visualize_modes(
             title_prefix=f"m{i}: ",
             fields=tuple(fields),
             ax=ax[i],
-            n_cmap=n_cmap,
-            mode_cmap=mode_cmap,
-            num_levels=num_levels,
+            cross_section_cmap=n_cmap,
+            mode_contours_cmap=mode_cmap,
+            num_contour_levels=num_levels,
             operation=operation,
             show=False,
         )
