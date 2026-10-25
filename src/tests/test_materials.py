@@ -10,6 +10,7 @@ class FakeMedium:
     an eps_comp that can behave as such, letting you give it off-diagonal
     entries.
     """
+
     def __init__(self, permittivity: np.ndarray, frequency: float) -> None:
         self.permittivity = permittivity
         self.frequency = frequency
@@ -24,12 +25,14 @@ def test_ensure_no_off_diagonal_accepts_diagonal_tensor():
     frequency = 2e14
     medium = FakeMedium(np.diag([4.0, 5.0, 6.0]), frequency)
 
-    material._ensure_no_off_diagonal(medium, frequency)
+    material._ensure_no_off_diagonal(medium, frequency)  # ty: ignore[invalid-argument-type]
 
 
-@pytest.mark.parametrize("i, j", [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)])
+@pytest.mark.parametrize(("i", "j"), [(0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1)])
 @pytest.mark.parametrize("value", [0.1, -0.1, 0.1j])
-def test_ensure_no_off_diagonal_rejects_off_diagonal_tensor(i, j, value):
+def test_ensure_no_off_diagonal_rejects_off_diagonal_tensor(
+    i: int, j: int, value: float
+):
     material = mw.TidyMaterial(name="LiNbO3", variant="Zelmon1997", optical_axis="z")
     frequency = 2e14
     permittivity = np.diag([4.0, 5.0, 6.0]).astype(complex)
@@ -37,4 +40,4 @@ def test_ensure_no_off_diagonal_rejects_off_diagonal_tensor(i, j, value):
     medium = FakeMedium(permittivity, frequency)
 
     with pytest.raises(ValueError, match="has off-diagonal permittivity components"):
-        material._ensure_no_off_diagonal(medium, frequency)
+        material._ensure_no_off_diagonal(medium, frequency)  # ty: ignore[invalid-argument-type]

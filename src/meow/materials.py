@@ -6,8 +6,6 @@ import os
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
-ComponentType = Literal["x", "y", "z"]
-"""Label representing a coordinate axis: 'x', 'y', or 'z'."""
 
 import numpy as np
 import pandas as pd
@@ -17,16 +15,21 @@ from scipy.constants import c
 from scipy.ndimage import map_coordinates
 from tidy3d import material_library
 from tidy3d.components.medium import AbstractMedium
+from tidy3d.components.types import Axis as TdAxis
 
 from meow.arrays import Dim, DType, NDArray
 from meow.base_model import BaseModel
 from meow.environment import Environment
 
-component_str_to_int: dict[ComponentType, int] = {
+ComponentType = Literal["x", "y", "z"]
+"""Label representing a coordinate axis: 'x', 'y', or 'z'."""
+
+component_str_to_int: dict[ComponentType, TdAxis] = {
     "x": 0,
     "y": 1,
     "z": 2,
 }
+
 
 class MaterialBase(BaseModel):
     """a `Material` defines the index of a `Structure3D` in an `Environment`."""
@@ -41,9 +44,13 @@ class MaterialBase(BaseModel):
         MATERIALS[self.name] = self
         return self
 
-    def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:
-        """Get the refractive index of the material for the given environment,
-        along the specified component ('x', 'y', or 'z')."""
+    def __call__(
+        self, env: Environment, component: ComponentType | None = None
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         msg = "Please use one of the Material child classes"
         raise NotImplementedError(msg)
 
@@ -74,14 +81,15 @@ class TidyMaterial(MaterialBase):
     variant: str = Field(description="The material variant as also used by tidy3d")
     optical_axis: ComponentType | None = Field(
         default=None,
-        description="The optical axis (axis with extraordinary refractive index). " \
-        "Required for anisotropic materials. Can be None for isotropic materials"
+        description="""The optical axis (axis with extraordinary refractive index).
+        Required for anisotropic materials. Can be None for isotropic materials""",
     )
     ignore_off_diagonal_permittivity: bool = Field(
         default=False,
-        description="Whether to ignore off-diagonal elements of the permittivity tensor. " \
-        "If False (default), ValueError is raised when off-diagonal elements are present. " \
-        "Currently, only diagonal (along x, y, z axes) anisotropy is supported."
+        description="""Whether to ignore off-diagonal elements of permittivity tensor.
+        If False (default), ValueError is raised when off-diagonal elements are present.
+        If True, only the diagonal elements of the permittivity tensor are considered.
+        Currently, only diagonal (along x, y, z axes) anisotropy is supported.""",
     )
 
     def __init__(self, **kwargs: Any) -> None:
@@ -104,9 +112,13 @@ class TidyMaterial(MaterialBase):
             msg = f"Specified variant is invalid. Use one of {_variant_options}."
             raise ValueError(msg)
 
-    def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:
-        """Get the refractive index of the material for the given environment,
-        along the specified component ('x', 'y', or 'z')."""
+    def __call__(
+        self, env: Environment, component: ComponentType | None = None
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         if not isinstance(env, Environment):
             env = Environment(**env)
         _material = material_library[self.name]
@@ -119,36 +131,46 @@ class TidyMaterial(MaterialBase):
         # if material can be called, it is anisotropic,
         # and needs to be called with axis value (0/1/2 for x/y/z)
         if callable(material):
+            if component not in ["x", "y", "z"]:
+                msg = (
+                    "Component must be specified for anisotropic materials. "
+                    f"Must be 'x', 'y', or 'z', but it was {component}."
+                )
+                raise ValueError(msg)
+
+            if self.optical_axis not in ["x", "y", "z"]:
+                msg = (
+                    "Optical axis must be specified for anisotropic materials. "
+                    f"Must be 'x', 'y', or 'z', but it was {self.optical_axis}."
+                )
+                raise ValueError(msg)
+
             material_along_axis = material(component_str_to_int[self.optical_axis])
             if not self.ignore_off_diagonal_permittivity:
                 self._ensure_no_off_diagonal(material_along_axis, freq=td.C_0 / env.wl)
-            eps_comp = getattr(
-                material_along_axis,
-                "eps_comp",
-                None
+            eps = material_along_axis.eps_comp(
+                component_str_to_int[component],
+                component_str_to_int[component],
+                td.C_0 / env.wl,
             )
         else:
-            eps_comp = getattr(material, "eps_comp", None)
+            eps = material.eps_comp(0, 0, td.C_0 / env.wl)
 
-        if eps_comp is None:
-            msg = (
-                f"Tidy3D material '{self.name}' variant '{self.variant}' "
-                "does not have a permittivity function."
-            )
-            raise ValueError(msg)
-        eps = eps_comp(component_str_to_int[component], component_str_to_int[component], td.C_0 / env.wl)
         return np.sqrt(eps)
 
-    def _ensure_no_off_diagonal(self, tidy3d_medium: AbstractMedium, freq: float) -> None:
-        """Ensure the material has no off-diagonal permittivity components at the given frequency."""
+    def _ensure_no_off_diagonal(
+        self, tidy3d_medium: AbstractMedium, freq: float
+    ) -> None:
+        """Ensure the material has no off-diagonal permittivity components."""
         for i in range(3):
             for j in range(3):
-                if i != j and tidy3d_medium.eps_comp(i, j, freq) != 0:
-                    raise ValueError(
-                        f"Tidy3D material '{self.name}' variant '{self.variant}' " \
-                        "has off-diagonal permittivity components. Currently, " \
+                if i != j and tidy3d_medium.eps_comp(i, j, freq) != 0:  # ty: ignore[invalid-argument-type]
+                    msg = (
+                        f"Tidy3D material '{self.name}' variant '{self.variant}' "
+                        "has off-diagonal permittivity components. Currently, "
                         "only diagonal (along x, y, z axes) anisotropy is supported."
                     )
+                    raise ValueError(msg)
 
 
 class IndexMaterial(MaterialBase):
@@ -156,10 +178,17 @@ class IndexMaterial(MaterialBase):
 
     n: complex = Field(description="the refractive index of the material")
 
-    def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:  # noqa: ARG002
-        """Get the refractive index of the material for the given environment,
-        along the specified component ('x', 'y', or 'z')."""
+    def __call__(
+        self,
+        env: Environment,  # noqa: ARG002
+        component: ComponentType | None = None,  # noqa: ARG002
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         return np.squeeze(np.asarray(self.n, dtype=np.complex128))
+
 
 class AnisotropicIndexMaterial(MaterialBase):
     """A material with a constant anisotropic refractive index."""
@@ -168,9 +197,15 @@ class AnisotropicIndexMaterial(MaterialBase):
     ny: complex = Field(description="refractive index along the y component")
     nz: complex = Field(description="refractive index along the z component")
 
-    def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:  # noqa: ARG002
-        """Get the refractive index of the material for the given environment,
-        along the specified component ('x', 'y', or 'z')."""
+    def __call__(
+        self,
+        env: Environment,  # noqa: ARG002
+        component: ComponentType | None = None,
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         if component == "x":
             result = self.nx
         elif component == "y":
@@ -178,8 +213,9 @@ class AnisotropicIndexMaterial(MaterialBase):
         elif component == "z":
             result = self.nz
         else:
-            raise ValueError(f"Invalid component: {component}")
-        
+            msg = f"Component must be 'x', 'y', or 'z', but it was {component}."
+            raise ValueError(msg)
+
         return np.squeeze(np.asarray(result, dtype=np.complex128))
 
 
@@ -237,8 +273,15 @@ class SampledMaterial(MaterialBase):
 
         return cls(name=name, params=params, n=n, meta=meta)
 
-    def __call__(self, env: Environment, component: ComponentType | None=None) -> np.ndarray:
-        """Get the refractive index of the material for the given environment."""
+    def __call__(
+        self,
+        env: Environment,
+        component: ComponentType | None = None,  # noqa: ARG002
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         if not isinstance(env, Environment):
             env = Environment(**env)
         df = pd.DataFrame({**self.params, "nr": np.real(self.n), "ni": np.imag(self.n)})
@@ -255,8 +298,11 @@ class SampledMaterial(MaterialBase):
         return np.squeeze(n)
 
 
-Material: TypeAlias = IndexMaterial | AnisotropicIndexMaterial | SampledMaterial | TidyMaterial
-"""A material: `IndexMaterial`, `AnisotropicIndexMaterial`, `SampledMaterial`, or `TidyMaterial`."""
+Material: TypeAlias = (
+    IndexMaterial | AnisotropicIndexMaterial | SampledMaterial | TidyMaterial
+)
+"""A material: `IndexMaterial`, `AnisotropicIndexMaterial`,
+`SampledMaterial`, or `TidyMaterial`."""
 Materials: TypeAlias = list[Material]
 """A list of `Material` objects."""
 MATERIALS: dict[str, MaterialBase] = {}

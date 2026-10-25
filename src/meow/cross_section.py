@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Any, Self
 
 import numpy as np
 import shapely
-from pydantic import Field
-from pydantic import PrivateAttr
+from pydantic import Field, PrivateAttr
 from shapely.ops import unary_union
 
 from meow.arrays import ComplexArray2D, IntArray2D
@@ -19,7 +18,7 @@ from meow.cell import (
     sort_structures,
 )
 from meow.environment import Environment
-from meow.materials import Material, ComponentType
+from meow.materials import ComponentType, Material
 from meow.mesh import Mesh2D
 from meow.structures import Structure2D
 
@@ -42,7 +41,9 @@ class CrossSection(BaseModel):
         description="use subpixel smoothing at interfaces; if False: winner-takes-all",
     )
     _cell: Cell | None = PrivateAttr(default=None)
-    _n_full_cache: dict[ComponentType, ComplexArray2D] = PrivateAttr(default_factory=dict)
+    _n_full_cache: dict[ComponentType, ComplexArray2D] = PrivateAttr(
+        default_factory=dict
+    )
 
     @classmethod
     def from_cell(
@@ -59,7 +60,7 @@ class CrossSection(BaseModel):
             env=env,
             subpixel_smoothing=subpixel_smoothing,
         )
-        result._cell=cell
+        result._cell = cell
         return result
 
     @cached_property
@@ -76,22 +77,25 @@ class CrossSection(BaseModel):
         """Return the material index array for the full mesh."""
         return _create_full_material_array(self.mesh, self.structures, self.materials)
 
-    def n_full(self, component: ComponentType="x") -> ComplexArray2D:
+    def n_full(self, component: ComponentType = "x") -> ComplexArray2D:
         """Return the refractive index (along the given axis) for the full mesh."""
         # check if n_full for this component exists in cache
         if component in self._n_full_cache:
             return self._n_full_cache[component]
-        else:
-            n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
-            for material, idx in self.materials.items():
-                n_full = np.where(self._m_full == idx, material(self.env, component=component), n_full)
-            self._n_full_cache[component] = n_full
-            return n_full
+        n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
+        for material, idx in self.materials.items():
+            n_full = np.where(
+                self._m_full == idx, material(self.env, component=component), n_full
+            )
+        self._n_full_cache[component] = n_full
+        return n_full
 
     @cached_property
     def nx(self) -> ComplexArray2D:
-        """Return the smoothed refractive index (associated with the x direction)
-        on the Ex positions."""
+        """Return smoothed refractive index on the Ex positions.
+
+        Associated with x axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "x"
@@ -102,8 +106,10 @@ class CrossSection(BaseModel):
 
     @cached_property
     def ny(self) -> ComplexArray2D:
-        """Return the smoothed refractive index (associated with the y direction)
-        on the Ey positions."""
+        """Return smoothed refractive index on the Ey positions.
+
+        Associated with y axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "y"
@@ -114,8 +120,10 @@ class CrossSection(BaseModel):
 
     @cached_property
     def nz(self) -> ComplexArray2D:
-        """Return the smoothed refractive index (associated with the z direction)
-        on the Ez positions."""
+        """Return smoothed refractive index on the Ez positions.
+
+        Associated with z axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "z"
