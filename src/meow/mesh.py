@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import BeforeValidator, Field
@@ -66,17 +66,22 @@ class Mesh2D(BaseModel):
         description="Number of standard pml layers to add in the two tangential axes.",
     )
 
-    def model_post_init(self, context) -> None:
+    def model_post_init(self, context: Any) -> None:
+        """Runs after pydantic finishes initialization. Validates fields.
+
+        Ensures that the x and y coordinates are strictly increasing.
+        """
         super().model_post_init(context)
 
         x_diff = self.x[1:] - self.x[:-1]
         if (x_diff <= 0).any():
-            raise ValueError("x coordinates must be strictly increasing")
-        
+            msg = "x coordinates must be strictly increasing"
+            raise ValueError(msg)
+
         y_diff = self.y[1:] - self.y[:-1]
         if (y_diff <= 0).any():
-            raise ValueError("y coordinates must be strictly increasing")
-        
+            msg = "y coordinates must be strictly increasing"
+            raise ValueError(msg)
 
     @cached_property
     def dx(self) -> FloatArray1D:

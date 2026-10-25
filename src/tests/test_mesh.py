@@ -1,8 +1,10 @@
 import pytest
 
+
 def test_nonincreasing_mesh_fails():
-    from meow.mesh import Mesh2D
     import numpy as np
+
+    from meow.mesh import Mesh2D
 
     with pytest.raises(ValueError, match="x coordinates must be strictly increasing"):
         Mesh2D(x=np.array([0, 1, 1]), y=np.array([0, 1, 2]))
