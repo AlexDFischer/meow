@@ -1,5 +1,4 @@
 import logging
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +13,7 @@ nx = 2
 ny = 3
 nz = 4
 test_anisotropic_material = mw.AnisotropicIndexMaterial(
-    name='test_anisotropic_material',
+    name="test_anisotropic_material",
     nx=nx,
     ny=ny,
     nz=nz,
@@ -27,6 +26,7 @@ waveguide_gap = 0.3
 dl = 0.02
 
 visualize = False
+
 
 def test_anisotropic_evanescent_coupler_matches_tidy3d():
     # load tidy3d results
@@ -105,20 +105,22 @@ def test_anisotropic_evanescent_coupler_matches_tidy3d():
             modes=modes, cell_lengths=cell_lengths
         )
         for pair in mode_pairs:
-            mode_pair_to_coupling[pair].append(np.abs(
-                S_matrix[port_map[f'left@{pair[0]}']][port_map[f'right@{pair[1]}']]
-            ) ** 2)
+            mode_pair_to_coupling[pair].append(
+                np.abs(
+                    S_matrix[port_map[f"left@{pair[0]}"]][port_map[f"right@{pair[1]}"]]
+                )
+                ** 2
+            )
 
     mode_pair_to_results_diff = {pair: [] for pair in mode_pairs}
     for mode_pair in mode_pairs:
         mode_pair_to_results_diff[mode_pair] = np.abs(
-            np.array(mode_pair_to_coupling[mode_pair]) - tidy3d_results[f"coupling_{mode_pair[0]}{mode_pair[1]}"]
+            np.array(mode_pair_to_coupling[mode_pair])
+            - tidy3d_results[f"coupling_{mode_pair[0]}{mode_pair[1]}"]
         )
 
     max_diff = max([np.max(mode_pair_to_results_diff[pair]) for pair in mode_pairs])
-    logger.info(
-        "Max difference between MEOW and Tidy3D: %.5f", max_diff
-    )
+    logger.info("Max difference between MEOW and Tidy3D: %.5f", max_diff)
 
     if visualize:
         from matplotlib import pyplot as plt
