@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Annotated, Any, Self, TypeAlias, cast
+from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import numpy as np
 import pandas as pd
@@ -14,10 +14,22 @@ from pydantic import Field, model_validator
 from scipy.constants import c
 from scipy.ndimage import map_coordinates
 from tidy3d import material_library
+from tidy3d.components.medium import AbstractMedium
+from tidy3d.components.types import Axis as TdAxis
+from tidy3d.material_library.material_library import VariantItem, VariantItemUniaxial
 
 from meow.arrays import Dim, DType, NDArray
 from meow.base_model import BaseModel
 from meow.environment import Environment
+
+ComponentType = Literal["x", "y", "z"]
+"""Label representing a coordinate axis: 'x', 'y', or 'z'."""
+
+component_str_to_int: dict[ComponentType, TdAxis] = {
+    "x": 0,
+    "y": 1,
+    "z": 2,
+}
 
 
 class MaterialBase(BaseModel):
@@ -33,8 +45,13 @@ class MaterialBase(BaseModel):
         MATERIALS[self.name] = self
         return self
 
-    def __call__(self, env: Environment) -> np.ndarray:
-        """Get the refractive index of the material for the given environment."""
+    def __call__(
+        self, env: Environment, component: ComponentType | None = None
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         msg = "Please use one of the Material child classes"
         raise NotImplementedError(msg)
 
@@ -63,6 +80,18 @@ class TidyMaterial(MaterialBase):
 
     name: str = Field(description="The material name as also used by tidy3d")
     variant: str = Field(description="The material variant as also used by tidy3d")
+    optical_axis: ComponentType | None = Field(
+        default=None,
+        description="""The optical axis (axis with extraordinary refractive index).
+        Required for anisotropic materials. Can be None for isotropic materials""",
+    )
+    ignore_off_diagonal_permittivity: bool = Field(
+        default=False,
+        description="""Whether to ignore off-diagonal elements of permittivity tensor.
+        If False (default), ValueError is raised when off-diagonal elements are present.
+        If True, only the diagonal elements of the permittivity tensor are considered.
+        Currently, only diagonal (along x, y, z axes) anisotropy is supported.""",
+    )
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the TidyMaterial."""
@@ -84,8 +113,13 @@ class TidyMaterial(MaterialBase):
             msg = f"Specified variant is invalid. Use one of {_variant_options}."
             raise ValueError(msg)
 
-    def __call__(self, env: Environment) -> np.ndarray:
-        """Get the refractive index of the material for the given environment."""
+    def __call__(
+        self, env: Environment, component: ComponentType | None = None
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         if not isinstance(env, Environment):
             env = Environment(**env)
         _material = material_library[self.name]
@@ -93,16 +127,58 @@ class TidyMaterial(MaterialBase):
         if _variants is None:
             msg = f"Tidy3D material '{self.name}' not supported."
             raise ValueError(msg)
-        mat = _material[self.variant]
-        eps_comp = getattr(mat, "eps_comp", None)
-        if eps_comp is None:
-            msg = (
-                f"Tidy3D material '{self.name}' variant '{self.variant}' "
-                "does not have a permittivity function."
+
+        variant = _material.variants[self.variant]
+
+        if isinstance(variant, VariantItem):
+            material = variant.medium
+            eps = material.eps_comp(0, 0, td.C_0 / env.wl)
+        elif isinstance(variant, VariantItemUniaxial):
+            material = variant.medium
+            if component not in ["x", "y", "z"]:
+                msg = (
+                    "Component must be specified for anisotropic materials. "
+                    f"Must be 'x', 'y', or 'z', but it was {component}."
+                )
+                raise ValueError(msg)
+
+            if self.optical_axis not in ["x", "y", "z"]:
+                msg = (
+                    "Optical axis must be specified for anisotropic materials. "
+                    f"Must be 'x', 'y', or 'z', but it was {self.optical_axis}."
+                )
+                raise ValueError(msg)
+
+            material_along_axis = material(component_str_to_int[self.optical_axis])
+            if not self.ignore_off_diagonal_permittivity:
+                self._ensure_no_off_diagonal(material_along_axis, freq=td.C_0 / env.wl)
+            eps = material_along_axis.eps_comp(
+                component_str_to_int[component],
+                component_str_to_int[component],
+                td.C_0 / env.wl,
             )
-            raise ValueError(msg)
-        eps = eps_comp(0, 0, td.C_0 / env.wl)
+        else:
+            msg = (
+                f"Unsupported material type: {type(variant)}."
+                " Supported types are VariantItem or VariantItemUniaxial."
+            )
+            raise TypeError(msg)
+
         return np.sqrt(eps)
+
+    def _ensure_no_off_diagonal(
+        self, tidy3d_medium: AbstractMedium, freq: float
+    ) -> None:
+        """Ensure the material has no off-diagonal permittivity components."""
+        for i in range(3):
+            for j in range(3):
+                if i != j and tidy3d_medium.eps_comp(i, j, freq) != 0:  # ty: ignore[invalid-argument-type]
+                    msg = (
+                        f"Tidy3D material '{self.name}' variant '{self.variant}' "
+                        "has off-diagonal permittivity components. Currently, "
+                        "only diagonal (along x, y, z axes) anisotropy is supported."
+                    )
+                    raise ValueError(msg)
 
 
 class IndexMaterial(MaterialBase):
@@ -110,9 +186,45 @@ class IndexMaterial(MaterialBase):
 
     n: complex = Field(description="the refractive index of the material")
 
-    def __call__(self, env: Environment) -> np.ndarray:  # noqa: ARG002
-        """Get the refractive index of the material for the given environment."""
+    def __call__(
+        self,
+        env: Environment,  # noqa: ARG002
+        component: ComponentType | None = None,  # noqa: ARG002
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         return np.squeeze(np.asarray(self.n, dtype=np.complex128))
+
+
+class AnisotropicIndexMaterial(MaterialBase):
+    """A material with a constant anisotropic refractive index."""
+
+    nx: complex = Field(description="refractive index along the x component")
+    ny: complex = Field(description="refractive index along the y component")
+    nz: complex = Field(description="refractive index along the z component")
+
+    def __call__(
+        self,
+        env: Environment,  # noqa: ARG002
+        component: ComponentType | None = None,
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
+        if component == "x":
+            result = self.nx
+        elif component == "y":
+            result = self.ny
+        elif component == "z":
+            result = self.nz
+        else:
+            msg = f"Component must be 'x', 'y', or 'z', but it was {component}."
+            raise ValueError(msg)
+
+        return np.squeeze(np.asarray(result, dtype=np.complex128))
 
 
 class SampledMaterial(MaterialBase):
@@ -169,8 +281,15 @@ class SampledMaterial(MaterialBase):
 
         return cls(name=name, params=params, n=n, meta=meta)
 
-    def __call__(self, env: Environment) -> np.ndarray:
-        """Get the refractive index of the material for the given environment."""
+    def __call__(
+        self,
+        env: Environment,
+        component: ComponentType | None = None,  # noqa: ARG002
+    ) -> np.ndarray:
+        """Get the refractive index of the material.
+
+        For the given environment, along the specified component ('x', 'y', or 'z').
+        """
         if not isinstance(env, Environment):
             env = Environment(**env)
         df = pd.DataFrame({**self.params, "nr": np.real(self.n), "ni": np.imag(self.n)})
@@ -187,8 +306,11 @@ class SampledMaterial(MaterialBase):
         return np.squeeze(n)
 
 
-Material: TypeAlias = IndexMaterial | SampledMaterial | TidyMaterial
-"""A material: `IndexMaterial`, `SampledMaterial`, or `TidyMaterial`."""
+Material: TypeAlias = (
+    IndexMaterial | AnisotropicIndexMaterial | SampledMaterial | TidyMaterial
+)
+"""A material: `IndexMaterial`, `AnisotropicIndexMaterial`,
+`SampledMaterial`, or `TidyMaterial`."""
 Materials: TypeAlias = list[Material]
 """A list of `Material` objects."""
 MATERIALS: dict[str, MaterialBase] = {}

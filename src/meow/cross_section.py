@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Any, Self
 
 import numpy as np
 import shapely
-from pydantic import Field
-from pydantic.v1 import PrivateAttr
+from pydantic import Field, PrivateAttr
 from shapely.ops import unary_union
 
 from meow.arrays import ComplexArray2D, IntArray2D
@@ -19,7 +18,7 @@ from meow.cell import (
     sort_structures,
 )
 from meow.environment import Environment
-from meow.materials import Material
+from meow.materials import ComponentType, Material
 from meow.mesh import Mesh2D
 from meow.structures import Structure2D
 
@@ -42,6 +41,9 @@ class CrossSection(BaseModel):
         description="use subpixel smoothing at interfaces; if False: winner-takes-all",
     )
     _cell: Cell | None = PrivateAttr(default=None)
+    _n_full_cache: dict[ComponentType, ComplexArray2D] = PrivateAttr(
+        default_factory=dict
+    )
 
     @classmethod
     def from_cell(
@@ -52,13 +54,14 @@ class CrossSection(BaseModel):
         subpixel_smoothing: bool = True,
     ) -> Self:
         """Create a CrossSection from a Cell and Environment."""
-        return cls(
+        result = cls(
             structures=cell.structures_2d,
             mesh=cell.mesh,
             env=env,
             subpixel_smoothing=subpixel_smoothing,
-            _cell=cell,
         )
+        result._cell = cell
+        return result
 
     @cached_property
     def materials(self) -> dict[Material, int]:
@@ -74,17 +77,25 @@ class CrossSection(BaseModel):
         """Return the material index array for the full mesh."""
         return _create_full_material_array(self.mesh, self.structures, self.materials)
 
-    @cached_property
-    def n_full(self) -> ComplexArray2D:
-        """Return the refractive index array for the full mesh."""
+    def n_full(self, component: ComponentType = "x") -> ComplexArray2D:
+        """Return the refractive index (along the given axis) for the full mesh."""
+        # check if n_full for this component exists in cache
+        if component in self._n_full_cache:
+            return self._n_full_cache[component]
         n_full = np.ones_like(self.mesh.X_full, dtype=np.complex128)
         for material, idx in self.materials.items():
-            n_full = np.where(self._m_full == idx, material(self.env), n_full)
+            n_full = np.where(
+                self._m_full == idx, material(self.env, component=component), n_full
+            )
+        self._n_full_cache[component] = n_full
         return n_full
 
     @cached_property
     def nx(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ex positions."""
+        """Return smoothed refractive index on the Ex positions.
+
+        Associated with x axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "x"
@@ -95,7 +106,10 @@ class CrossSection(BaseModel):
 
     @cached_property
     def ny(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ey positions."""
+        """Return smoothed refractive index on the Ey positions.
+
+        Associated with y axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "y"
@@ -106,7 +120,10 @@ class CrossSection(BaseModel):
 
     @cached_property
     def nz(self) -> ComplexArray2D:
-        """Return the smoothed refractive index on the Ez positions."""
+        """Return smoothed refractive index on the Ez positions.
+
+        Associated with z axis (for anisotropic materials).
+        """
         if self.subpixel_smoothing:
             return _compute_smoothed_n(
                 self.mesh, self._m_full, self.materials, self.env, self.structures, "z"
@@ -122,6 +139,7 @@ class CrossSection(BaseModel):
         n_cmap: Any = None,
         cbar: bool = True,
         show: bool = True,
+        index_component: ComponentType = "x",
         **ignored: Any,
     ) -> None:
         import matplotlib.pyplot as plt  # fmt: skip
@@ -137,7 +155,7 @@ class CrossSection(BaseModel):
             plt.sca(ax)
         else:
             ax = plt.gca()
-        n_full = np.real(self.n_full).copy()
+        n_full = np.real(self.n_full(component=index_component)).copy()
         n_full[0, 0] = 1.0
         plt.pcolormesh(self.mesh.X_full, self.mesh.Y_full, n_full, cmap=n_cmap)
         plt.axis("scaled")
@@ -161,9 +179,9 @@ class CrossSection(BaseModel):
         if cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
-            values = np.unique(np.real(self.n_full))
+            values = np.unique(np.real(n_full))
             _cbar = plt.colorbar(ticks=values, cax=cax)
-            # material_names = ['air'] + [mat.name for mat in self.cell.materials]
+            # material_names = ['vacuum'] + [mat.name for mat in self.cell.materials]
             # labels = [f"\n{n}\n{v:.3f}" for n, v in zip(material_names, values)]
             labels = [f"{v:.3f}" for v in values]
             _cbar.ax.set_yticklabels(labels, rotation=90, va="center", ha="center")
@@ -183,7 +201,7 @@ _COMPONENT_SLICES = {
 
 def _dual_cell_bounds(
     mesh: Mesh2D,
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute (x_lo, x_hi, y_lo, y_hi) for the dual cells of a field component.
 
@@ -236,7 +254,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     materials: dict[Material, int],
     env: Environment,
     structures: list[Structure2D],
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> ComplexArray2D:
     """Compute subpixel-smoothed refractive index for a field component.
 
@@ -249,11 +267,11 @@ def _compute_smoothed_n(  # noqa: PLR0915
     m_comp = m_full[si, sj]
 
     # Build eps array from material indices
-    env_eps = np.complex128(1.0) ** 2  # background: air (n=1)
+    env_eps = np.complex128(1.0) ** 2  # background: vacuum (n=1)
     eps = np.full_like(m_comp, env_eps, dtype=np.complex128)
     mat_eps: dict[int, complex] = {0: env_eps}
     for material, idx in materials.items():
-        n_val = material(env)
+        n_val = material(env, component=component)
         e = np.complex128(n_val) ** 2
         eps[m_comp == idx] = e
         mat_eps[idx] = e
@@ -298,7 +316,7 @@ def _compute_smoothed_n(  # noqa: PLR0915
     # Clip accumulated area to avoid tiny numerical overshoots > 1.
     total_struct_fraction = np.clip(total_struct_fraction, 0.0, 1.0)
 
-    # Background (air) gets the remainder.
+    # Background (vacuum) gets the remainder.
     fractions[0] = np.maximum(1.0 - total_struct_fraction, 0.0)
 
     # Determine interface orientation
@@ -358,7 +376,7 @@ def _compute_winner_takes_all_n(
     materials: dict[Material, int],
     env: Environment,
     structures: list[Structure2D],
-    component: Literal["x", "y", "z"],
+    component: ComponentType,
 ) -> ComplexArray2D:
     """Compute refractive index using winner-takes-all (no subpixel smoothing).
 
@@ -376,7 +394,7 @@ def _compute_winner_takes_all_n(
     eps = np.full_like(m_comp, env_eps, dtype=np.complex128)
     mat_eps: dict[int, complex] = {0: env_eps}
     for material, idx in materials.items():
-        n_val = material(env)
+        n_val = material(env, component=component)
         e = np.complex128(n_val) ** 2
         eps[m_comp == idx] = e
         mat_eps[idx] = e
