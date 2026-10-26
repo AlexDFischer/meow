@@ -16,6 +16,7 @@ from scipy.ndimage import map_coordinates
 from tidy3d import material_library
 from tidy3d.components.medium import AbstractMedium
 from tidy3d.components.types import Axis as TdAxis
+from tidy3d.material_library.material_library import VariantItem, VariantItemUniaxial
 
 from meow.arrays import Dim, DType, NDArray
 from meow.base_model import BaseModel
@@ -126,11 +127,14 @@ class TidyMaterial(MaterialBase):
         if _variants is None:
             msg = f"Tidy3D material '{self.name}' not supported."
             raise ValueError(msg)
-        material = _material[self.variant]
 
-        # if material can be called, it is anisotropic,
-        # and needs to be called with axis value (0/1/2 for x/y/z)
-        if callable(material):
+        variant = _material.variants[self.variant]
+
+        if isinstance(variant, VariantItem):
+            material = variant.medium
+            eps = material.eps_comp(0, 0, td.C_0 / env.wl)
+        elif isinstance(variant, VariantItemUniaxial):
+            material = variant.medium
             if component not in ["x", "y", "z"]:
                 msg = (
                     "Component must be specified for anisotropic materials. "
@@ -154,7 +158,11 @@ class TidyMaterial(MaterialBase):
                 td.C_0 / env.wl,
             )
         else:
-            eps = material.eps_comp(0, 0, td.C_0 / env.wl)
+            msg = (
+                f"Unsupported material type: {type(variant)}."
+                " Supported types are VariantItem or VariantItemUniaxial."
+            )
+            raise TypeError(msg)
 
         return np.sqrt(eps)
 
