@@ -115,21 +115,22 @@ class Mode(BaseModel):
         title: str | None = None,
         title_prefix: str = "",
         fields: tuple[str, ...] = ("Ex",),
+        operation: Callable = _power,
         ax: Any = None,
-        plot_cross_section: bool = True,
+        show: bool = True,
+        draw_cross_section: bool = True,
         cross_section_cmap: str | colors.LinearSegmentedColormap | None = None,
-        plot_mode_contours: bool = True,
+        draw_mode_contours: bool = True,
         mode_contours_cmap: str | None = None,
         num_contour_levels: int = 8,
-        plot_mode_image: bool = False,
+        draw_mode_image: bool = False,
         mode_image_cmap: str | None = None,
         mode_image_alpha: float = 0.5,
-        plot_structure_boundaries: bool = False,
+        draw_structure_boundaries: bool = False,
         structure_boundaries_color: ColorType = "black",
-        operation: Callable = _power,
-        show: bool = True,
         **_: Any,
     ) -> None:
+        print('in visualize')
         from meow.visualization import _figsize_visualize_mode
 
         W, H = _figsize_visualize_mode(self.cs, 6.4)
@@ -156,15 +157,15 @@ class Mode(BaseModel):
                     title_prefix=title_prefix,
                     fields=(field,),
                     ax=ax_,
-                    plot_cross_section=plot_cross_section,
+                    draw_cross_section=draw_cross_section,
                     cross_section_cmap=cross_section_cmap,
-                    plot_mode_contours=plot_mode_contours,
+                    draw_mode_contours=draw_mode_contours,
                     mode_contours_cmap=mode_contours_cmap,
                     num_contour_levels=num_contour_levels,
-                    plot_mode_image=plot_mode_image,
+                    draw_mode_image=draw_mode_image,
                     mode_image_cmap=mode_image_cmap,
                     mode_image_alpha=mode_image_alpha,
-                    plot_structure_boundaries=plot_structure_boundaries,
+                    draw_structure_boundaries=draw_structure_boundaries,
                     structure_boundaries_color=structure_boundaries_color,
                     operation=operation,
                     show=False,
@@ -183,9 +184,9 @@ class Mode(BaseModel):
             ax = plt.gca()
         plt.sca(ax)
 
-        # first, plot cross section
+        # first, draw cross section
 
-        if plot_cross_section:
+        if draw_cross_section:
             if cross_section_cmap is None:
                 # little bit lighter colored than the one in cs._visualize:
                 cross_section_cmap = colors.LinearSegmentedColormap.from_list(
@@ -194,21 +195,28 @@ class Mode(BaseModel):
             self.cs._visualize(ax=ax, n_cmap=cross_section_cmap, cbar=False, show=False)
 
         # draw structure boundaries
-        if plot_structure_boundaries:
-            for structure in self.cs.structures:
-                geometry = structure.geometry
+        if draw_structure_boundaries:
+            structure_boundaries_kwargs = {
+                'color': structure_boundaries_color,
+                'linewidth': 1,
+            }
+            for structure2d in self.cs.structures:
+                geometry = structure2d.geometry
                 if isinstance(geometry, Polygon2D):
-                    msg = "Polygon2D not supported yet"
+                    polygon_x = np.append(geometry.poly[:,0], geometry.poly[0,0])
+                    polygon_y = np.append(geometry.poly[:,1], geometry.poly[0,1])
+                    plt.plot(polygon_x, polygon_y, **structure_boundaries_kwargs)
+                elif isinstance(geometry, Rectangle):
+                    plt.plot(
+                        [geometry.x_max, geometry.x_min, geometry.x_min, geometry.x_max, geometry.x_max],
+                        [geometry.y_max, geometry.y_max, geometry.y_min, geometry.y_min, geometry.y_max],
+                        **structure_boundaries_kwargs
+                    )
+                else:
+                    msg = f"Unsupported geometry type: {type(geometry)}"
                     raise NotImplementedError(msg)
-                    # TODO: implement polygon drawing
-                if isinstance(geometry, Rectangle):
-                    msg = "Rectangle not supported yet"
-                    raise NotImplementedError(msg)
-                    # TODO: implement rectangle drawing
-                msg = f"Unsupported geometry type: {type(geometry)}"
-                raise NotImplementedError(msg)
 
-        # plot mode image and contours
+        # plot mode image then contours
 
         x, y = "x", "y"  # currently only propagation in z supported, see Mesh2D
         c = {
@@ -229,17 +237,28 @@ class Mode(BaseModel):
             warnings.filterwarnings("ignore", category=UserWarning)
             levels = np.linspace(mode.min(), mode.max(), num_contour_levels + 1)[1:]
 
-            if plot_mode_image:
+            if draw_mode_image:
                 if mode_image_cmap is None:
                     mode_image_cmap = "rainbow"
                 plt.pcolormesh(
-                    X, Y, mode, cmap=mode_image_cmap, alpha=mode_image_alpha
-                )  # , levels=levels)
+                    X,
+                    Y,
+                    mode,
+                    cmap=mode_image_cmap, alpha=mode_image_alpha,
+                    zorder=3, # above everything that's already been plotted, below contours
+                )
 
-            if plot_mode_contours:
+            if draw_mode_contours:
                 if mode_contours_cmap is None:
                     mode_contours_cmap = "inferno"
-                plt.contour(X, Y, mode, cmap=mode_contours_cmap, levels=levels)
+                plt.contour(
+                    X,
+                    Y,
+                    mode,
+                    cmap=mode_contours_cmap,
+                    levels=levels,
+                    zorder=4, # above mode image
+                )
 
         # colorbar on right
 
