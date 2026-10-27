@@ -3,7 +3,9 @@ on:
   push:
     branches:
       - main
-  pull_request:
+  # Labeling/commenting needs a writable base-repository token for fork PRs.
+  # Keep this workflow metadata-only: do not check out or execute PR code.
+  pull_request_target:
     types: [edited, opened, reopened, synchronize, unlabeled, labeled]
 
 permissions:
