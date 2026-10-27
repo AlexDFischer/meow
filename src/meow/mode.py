@@ -118,20 +118,43 @@ class Mode(BaseModel):
         operation: Callable = _power,
         ax: Any = None,
         show: bool = True,
-        draw_cross_section: bool = True,
-        cross_section_cmap: str | colors.LinearSegmentedColormap | None = None,
+        draw_refractive_index: bool | None = None,
+        refractive_index_cmap: str | colors.LinearSegmentedColormap | None = None,
         draw_mode_contours: bool = True,
         mode_contours_cmap: str | None = None,
         num_contour_levels: int = 8,
         draw_mode_image: bool = False,
-        mode_image_cmap: str | None = None,
-        mode_image_alpha: float = 0.5,
+        mode_image_cmap: str = "rainbow",
+        mode_image_alpha: float = 0.6,
         draw_structure_boundaries: bool = False,
         structure_boundaries_color: ColorType = "black",
         **_: Any,
     ) -> None:
-        print('in visualize')
+        """Visualization function for Mode. There are several visualization options.
+
+        Args:
+            title (str | None, optional): Title for plot image. Defaults to None, in which case title is generated using field plotted and effective index.
+            title_prefix (str, optional): Prefix to put before the automatic title (or manual title if specified). Defaults to "".
+            fields (tuple[str, ...], optional): Tuple of field components to visualize. Can be "<E or H or P><x or y or z>. Defaults to ("Ex",).
+            operation (Callable, optional): Vectorized function to apply to mode field. Defaults to |...|^2.
+            ax (Any, optional): Matplotlib axis to draw on. Defaults to None, in which case new axes are made.
+            show (bool, optional): Whether to display the plot immediately. Defaults to True.
+            draw_refractive_index (bool | None, optional): Whether to draw the refractive index profile below the mode (equivalent to visualizing the mode's CrossSection underneath the mode). Defaults to None, in which case it becomes True iff draw_mode_image is False.
+            refractive_index_cmap (str | colors.LinearSegmentedColormap | None, optional): Maps refractive index to color. Defaults to None.
+            draw_mode_contours (bool, optional): Whether to draw mode contours. Defaults to True.
+            mode_contours_cmap (str | None, optional): Colormap for mode contours. Defaults to None.
+            num_contour_levels (int, optional): Number of contour levels for mode contours. Defaults to 8.
+            draw_mode_image (bool, optional): Whether to draw the mode as an image. Defaults to False.
+            mode_image_cmap (str, optional): Maps mode field value to color. Defaults to "rainbow".
+            mode_image_alpha (float, optional): Transparency of the mode image. Defaults to 0.6.
+            draw_structure_boundaries (bool, optional): Whether to draw lines around structure boundaries. Defaults to False.
+            structure_boundaries_color (ColorType, optional): Structure boundaries color. Defaults to "black".
+        """
         from meow.visualization import _figsize_visualize_mode
+
+        # by default, draw refractive index if not drawing mode
+        if draw_refractive_index is None:
+            draw_refractive_index = not draw_mode_image
 
         W, H = _figsize_visualize_mode(self.cs, 6.4)
 
@@ -157,8 +180,8 @@ class Mode(BaseModel):
                     title_prefix=title_prefix,
                     fields=(field,),
                     ax=ax_,
-                    draw_cross_section=draw_cross_section,
-                    cross_section_cmap=cross_section_cmap,
+                    draw_refractive_index=draw_refractive_index,
+                    refractive_index_cmap=refractive_index_cmap,
                     draw_mode_contours=draw_mode_contours,
                     mode_contours_cmap=mode_contours_cmap,
                     num_contour_levels=num_contour_levels,
@@ -186,13 +209,13 @@ class Mode(BaseModel):
 
         # first, draw cross section
 
-        if draw_cross_section:
-            if cross_section_cmap is None:
+        if draw_refractive_index:
+            if refractive_index_cmap is None:
                 # little bit lighter colored than the one in cs._visualize:
-                cross_section_cmap = colors.LinearSegmentedColormap.from_list(
+                refractive_index_cmap = colors.LinearSegmentedColormap.from_list(
                     name="c_cmap", colors=["#ffffff", "#c1d9ed"]
                 )
-            self.cs._visualize(ax=ax, n_cmap=cross_section_cmap, cbar=False, show=False)
+            self.cs._visualize(ax=ax, n_cmap=refractive_index_cmap, cbar=False, show=False)
 
         # draw structure boundaries
         if draw_structure_boundaries:
@@ -201,19 +224,19 @@ class Mode(BaseModel):
                 'linewidth': 1,
             }
             for structure2d in self.cs.structures:
-                geometry = structure2d.geometry
-                if isinstance(geometry, Polygon2D):
-                    polygon_x = np.append(geometry.poly[:,0], geometry.poly[0,0])
-                    polygon_y = np.append(geometry.poly[:,1], geometry.poly[0,1])
+                geometry2d = structure2d.geometry
+                if isinstance(geometry2d, Polygon2D):
+                    polygon_x = np.append(geometry2d.poly[:,0], geometry2d.poly[0,0])
+                    polygon_y = np.append(geometry2d.poly[:,1], geometry2d.poly[0,1])
                     plt.plot(polygon_x, polygon_y, **structure_boundaries_kwargs)
-                elif isinstance(geometry, Rectangle):
+                elif isinstance(geometry2d, Rectangle):
                     plt.plot(
-                        [geometry.x_max, geometry.x_min, geometry.x_min, geometry.x_max, geometry.x_max],
-                        [geometry.y_max, geometry.y_max, geometry.y_min, geometry.y_min, geometry.y_max],
+                        [geometry2d.x_max, geometry2d.x_min, geometry2d.x_min, geometry2d.x_max, geometry2d.x_max],
+                        [geometry2d.y_max, geometry2d.y_max, geometry2d.y_min, geometry2d.y_min, geometry2d.y_max],
                         **structure_boundaries_kwargs
                     )
                 else:
-                    msg = f"Unsupported geometry type: {type(geometry)}"
+                    msg = f"Unsupported geometry type: {type(geometry2d)}"
                     raise NotImplementedError(msg)
 
         # plot mode image then contours
@@ -238,8 +261,6 @@ class Mode(BaseModel):
             levels = np.linspace(mode.min(), mode.max(), num_contour_levels + 1)[1:]
 
             if draw_mode_image:
-                if mode_image_cmap is None:
-                    mode_image_cmap = "rainbow"
                 plt.pcolormesh(
                     X,
                     Y,
