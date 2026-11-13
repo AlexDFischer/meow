@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
+import gdsfactory
 import numpy as np
 import shapely.geometry as sg
 from pydantic import Field
@@ -62,42 +61,96 @@ class GdsExtrusionRule(BaseModel):
         )
 
 
-def extrude_gds(
-    cell: Any,  # gf.Component | gdspy.Cell | gdstk.Cell
+# Frequenct linter and type checker ignores in following methods ar ebecaues
+# we are guarding against older versions of gdsfactory that have different
+# method signatures.
+
+
+def extrude_gdsf_component(
+    component: gdsfactory.Component,
     extrusions: dict[tuple[int, int], list[GdsExtrusionRule]],
 ) -> list[Structure3D]:
-    """Extrude a gds cell given a dictionary of extrusion rules.
+    """Extrude a gdsfactory Component given a dictionary of extrusion rules.
 
     Args:
-        cell: a gdspy or gdstk Cell to extrude.
+        component: a gdsfactory Component to extrude.
         extrusions: the extrusion rules to use
             (if not given, the example extrusions will be used).
 
     Returns:
         A list of Structure3D objects created from the extruded polygons.
     """
-    structs = []
-    for layer, polys in _get_polygons(cell).items():
-        for poly in polys:
+    structures = []
+
+    if _get_major_gdsfactory_version() < 8:
+        polygons_dict = component.get_polygons(by_spec=True, as_array=True)  # ty: ignore[unknown-argument]
+    else:
+        polygons_dict = component.get_polygons(
+            by="tuple",
+            layers=extrusions.keys(),  # ty: ignore[invalid-argument-type]
+        )
+    for layer, polygons in polygons_dict.items():
+        for polygon in polygons:
             if layer not in extrusions:
                 continue
-            structs.extend(extrusion(poly) for extrusion in extrusions[layer])
-    return structs
+
+            if _get_major_gdsfactory_version() < 8:
+                polygon_points = polygon
+            else:
+                polygon_points = np.array(
+                    [[p.x, p.y] for p in polygon.each_point_hull()], dtype=float
+                )
+
+            polygon_points *= component.layout().dbu
+            structures.extend(
+                extrusion(polygon_points)  # ty: ignore[invalid-argument-type]
+                for extrusion in extrusions[layer]  # ty: ignore[invalid-argument-type]
+            )
+    return structures
 
 
-def _get_polygons(cell: Any) -> dict[tuple[int, int], list[np.ndarray]]:
-    if _get_major_gdsfactory_version() < 8:
-        return cell.get_polygons(by_spec=True, depth=None)
-    dbu = cell.layout().dbu
-    polys = cell.get_polygons()
-    layers = cell.layout().layer_infos()
-    return {
-        (layers[i].layer, layers[i].datatype): [
-            np.asarray([(p.x * dbu, p.y * dbu) for p in p.each_point_hull()])
-            for p in ps
-        ]
-        for i, ps in polys.items()
-    }
+def extrude_gdspy_cell(
+    cell: gdspy.Cell,  # ty: ignore[unresolved-reference] # noqa: F821
+    extrusions: dict[tuple[int, int], list[GdsExtrusionRule]],
+) -> list[Structure3D]:
+    """Extrude a gdspy Cell given a dictionary of extrusion rules.
+
+    Args:
+        cell: a gdspy Cell to extrude.
+        extrusions: the extrusion rules to use.
+
+    Returns:
+        A list of Structure3D objects created from the extruded polygons.
+    """
+    structures = []
+    for layer, extrusion_rules in extrusions.items():
+        polygons = cell.get_polygons(by_spec=layer)
+        for extrusion_rule in extrusion_rules:
+            structures.extend(extrusion_rule(polygon) for polygon in polygons)
+
+    return structures
+
+
+def extrude_gdstk_cell(
+    cell: gdstk.Cell,  # ty: ignore[unresolved-reference] # noqa: F821
+    extrusions: dict[tuple[int, int], list[GdsExtrusionRule]],
+) -> list[Structure3D]:
+    """Extrude a gdstk Cell given a dictionary of extrusion rules.
+
+    Args:
+        cell: a gdstk Cell to extrude.
+        extrusions: the extrusion rules to use.
+
+    Returns:
+        A list of Structure3D objects created from the extruded polygons.
+    """
+    structures = []
+    for layer, extrusion_rules in extrusions.items():
+        polygons = cell.get_polygons(layer=layer[0], datatype=layer[1])
+        for extrusion_rule in extrusion_rules:
+            structures.extend(extrusion_rule(polygon.points) for polygon in polygons)
+
+    return structures
 
 
 def _get_major_gdsfactory_version() -> int:

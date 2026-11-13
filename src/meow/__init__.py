@@ -94,7 +94,9 @@ from meow.fde import (
 )
 from meow.gds_structures import (
     GdsExtrusionRule,
-    extrude_gds,
+    extrude_gdsf_component,
+    extrude_gdspy_cell,
+    extrude_gdstk_cell,
 )
 from meow.geometries import (
     AxisDirection,
@@ -254,7 +256,9 @@ __all__ = [
     "energy_density",
     "enforce_passivity",
     "environment",
-    "extrude_gds",
+    "extrude_gdsf_component",
+    "extrude_gdspy_cell",
+    "extrude_gdstk_cell",
     "fde",
     "filter_modes",
     "gds_structures",
