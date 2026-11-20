@@ -343,8 +343,50 @@ def _draw_pml(
     Returns:
         The list of added ``matplotlib.patches.Rectangle`` patches.
     """
+    return _draw_boundary_boxes(ax, _pml_boxes(mesh), color, zorder)
+
+
+def _absorber_boxes(mesh: Mesh2D) -> list[tuple[float, float, float, float]]:
+    """Return visible absorber bands without painting the corners twice."""
+    left, right = mesh._absorber_left, mesh._absorber_right
+    top, bottom = mesh._absorber_top, mesh._absorber_bottom
+    if all(side is None for side in (left, right, top, bottom)):
+        return []
+
+    x_min, x_max = mesh.x[0], mesh.x_[-1]
+    y_min, y_max = mesh.y[0], mesh.y_[-1]
+    x_lo = min(x_min + left.length, x_max) if left is not None else x_min
+    x_hi = max(x_max - right.length, x_lo) if right is not None else x_max
+    y_lo = min(y_min + bottom.length, y_max) if bottom is not None else y_min
+    y_hi = max(y_max - top.length, y_lo) if top is not None else y_max
+
+    return [
+        box
+        for box in (
+            (x_min, x_lo, y_min, y_max),
+            (x_hi, x_max, y_min, y_max),
+            (x_lo, x_hi, y_min, y_lo),
+            (x_lo, x_hi, y_hi, y_max),
+        )
+        if box[0] < box[1] and box[2] < box[3]
+    ]
+
+
+def _draw_absorbers(
+    ax: Axes, boxes: list[tuple[float, float, float, float]]
+) -> list[MplRect]:
+    """Draw adiabatic absorber regions on the given axes."""
+    return _draw_boundary_boxes(ax, boxes, ABSORBER_DEFAULT_RGBA, zorder=2)
+
+
+def _draw_boundary_boxes(
+    ax: Axes,
+    boxes: list[tuple[float, float, float, float]],
+    color: tuple[float, float, float, float],
+    zorder: float,
+) -> list[MplRect]:
     patches = []
-    for x0, x1, y0, y1 in _pml_boxes(mesh):
+    for x0, x1, y0, y1 in boxes:
         if x1 <= x0 or y1 <= y0:
             continue
         rect = MplRect(

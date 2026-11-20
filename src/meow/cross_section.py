@@ -19,7 +19,7 @@ from meow.cell import (
 )
 from meow.environment import Environment
 from meow.materials import ComponentType, Material
-from meow.mesh import Mesh2D, _draw_mesh, _draw_pml
+from meow.mesh import Mesh2D, _absorber_boxes, _draw_absorbers, _draw_mesh, _draw_pml
 from meow.structures import Structure2D
 
 
@@ -144,6 +144,7 @@ class CrossSection(BaseModel):
         n_cmap: Any = None,
         cbar: bool = True,
         draw_pml: bool = True,
+        draw_absorbers: bool = True,
         draw_mesh: bool = False,
         mesh_draw_option: str = "primal",
         mesh_linewidth: float = 0.5,
@@ -183,6 +184,8 @@ class CrossSection(BaseModel):
 
         if draw_pml and self.mesh.num_pml != (0, 0):
             _draw_pml(ax, mesh=self.mesh)
+        if draw_absorbers:
+            _draw_absorbers(ax, _absorber_boxes(self.mesh))
 
         plt.axis("scaled")
         if draw_mesh:
@@ -190,8 +193,7 @@ class CrossSection(BaseModel):
         elif not debug_grid:
             plt.grid(visible=True)
         else:
-            dx = self.mesh.dx
-            dy = self.mesh.dy
+            dx, dy = self.mesh.dx, self.mesh.dy
             x_ticks = np.sort(np.unique(self.mesh.X_full.ravel()))[::2]
             y_ticks = np.sort(np.unique(self.mesh.Y_full.ravel()))[::2]
             plt.xticks(x_ticks - 0.25 * dx, ["" for _ in x_ticks - 0.25 * dx])
@@ -217,7 +219,6 @@ class CrossSection(BaseModel):
             # labels = [f"\n{n}\n{v:.3f}" for n, v in zip(material_names, values)]
             labels = [f"{v:.3f}" for v in values]
             _cbar.ax.set_yticklabels(labels, va="center")
-            plt.sca(ax)
         if show:
             plt.show()
 
@@ -304,15 +305,13 @@ def _apply_absorbing_boundaries(
         absorbing boundaries added.
     """
     for boundary, distance_from_edge in [
-        (mesh._absorber_left, x - x[0]),
-        (mesh._absorber_right, x[-1] - x),
-        (mesh._absorber_top, y - y[0]),
-        (mesh._absorber_bottom, y[-1] - y),
+        (mesh._absorber_left, (x - x[0])[:, None]),
+        (mesh._absorber_right, (x[-1] - x)[:, None]),
+        (mesh._absorber_top, (y[-1] - y)[None, :]),
+        (mesh._absorber_bottom, (y - y[0])[None, :]),
     ]:
         if boundary is not None:
-            n = n + 1j * np.expand_dims(
-                boundary.extinction_coef(distance_from_edge=distance_from_edge), axis=1
-            )
+            n = n + 1j * boundary.extinction_coef(distance_from_edge=distance_from_edge)
 
     return n
 

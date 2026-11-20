@@ -14,7 +14,15 @@ from shapely.ops import unary_union
 from meow.arrays import Dim, DType, IntArray2D, NDArray
 from meow.base_model import BaseModel, cached_property
 from meow.materials import Material
-from meow.mesh import PML_DEFAULT_RGBA, Mesh2D, _draw_mesh, _draw_pml
+from meow.mesh import (
+    ABSORBER_DEFAULT_RGBA,
+    PML_DEFAULT_RGBA,
+    Mesh2D,
+    _absorber_boxes,
+    _draw_absorbers,
+    _draw_mesh,
+    _draw_pml,
+)
 from meow.structures import Structure2D, Structure3D, sort_structures
 
 
@@ -76,6 +84,7 @@ class Cell(BaseModel):
         ax: Any = None,
         cbar: bool = True,
         draw_pml: bool = True,
+        draw_absorbers: bool = True,
         draw_mesh: bool = False,
         mesh_draw_option: str = "primal",
         mesh_linewidth: float = 0.5,
@@ -88,12 +97,16 @@ class Cell(BaseModel):
 
         draw_pml_this_plot = draw_pml and self.mesh.num_pml != (0, 0)
 
+        absorber_boxes = _absorber_boxes(self.mesh) if draw_absorbers else []
+
         colors = [(0, 0, 0, 0)] + [
             to_rgba(m.meta.get("color", (0, 0, 0, 0))) for m in self.materials
         ]
 
         if draw_pml_this_plot:
             colors.append(PML_DEFAULT_RGBA)
+        if absorber_boxes:
+            colors.append(ABSORBER_DEFAULT_RGBA)
 
         cmap = ListedColormap(colors=colors)
         if ax is not None:
@@ -110,11 +123,13 @@ class Cell(BaseModel):
             self.m_full,
             cmap=cmap,
             vmin=0,
-            vmax=len(self.materials) + (2 if draw_pml_this_plot else 1),
+            vmax=len(colors),
         )
         if draw_pml_this_plot:
             # lazy import to avoid circular import
-            _draw_pml(plt.gca(), mesh=self.mesh)
+            _draw_pml(ax, mesh=self.mesh)
+        if absorber_boxes:
+            _draw_absorbers(ax, absorber_boxes)
 
         plt.axis("scaled")
 
@@ -138,6 +153,10 @@ class Cell(BaseModel):
 
             if draw_pml_this_plot:
                 labels.append("PML")
+                ticks.append(ticks[-1] + 1)
+
+            if absorber_boxes:
+                labels.append("Adiabatic absorber")
                 ticks.append(ticks[-1] + 1)
 
             _cbar = plt.colorbar(
