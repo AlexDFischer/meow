@@ -14,7 +14,7 @@ from shapely.ops import unary_union
 from meow.arrays import Dim, DType, IntArray2D, NDArray
 from meow.base_model import BaseModel, cached_property
 from meow.materials import Material
-from meow.mesh import Mesh2D
+from meow.mesh import PML_DEFAULT_RGBA, Mesh2D, _draw_mesh, _draw_pml
 from meow.structures import Structure2D, Structure3D, sort_structures
 
 
@@ -75,6 +75,10 @@ class Cell(BaseModel):
         *,
         ax: Any = None,
         cbar: bool = True,
+        draw_pml: bool = True,
+        draw_mesh: bool = False,
+        mesh_draw_option: str = "primal",
+        mesh_linewidth: float = 0.5,
         show: bool = True,
         **_: Any,
     ) -> None:
@@ -82,24 +86,47 @@ class Cell(BaseModel):
         from matplotlib.colors import ListedColormap, to_rgba
         from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+        draw_pml_this_plot = draw_pml and self.mesh.num_pml != (0, 0)
+
         colors = [(0, 0, 0, 0)] + [
             to_rgba(m.meta.get("color", (0, 0, 0, 0))) for m in self.materials
         ]
+
+        if draw_pml_this_plot:
+            colors.append(PML_DEFAULT_RGBA)
+
         cmap = ListedColormap(colors=colors)
         if ax is not None:
             plt.sca(ax)
         else:
             ax = plt.gca()
+
+        # X_full, Y_full, and m_full all have the same shape, so shading mode
+        # default 'auto' becomes 'nearest': each grind point has cell centered
+        # on it, extending halfway to next cell
         plt.pcolormesh(
             self.mesh.X_full,
             self.mesh.Y_full,
             self.m_full,
             cmap=cmap,
             vmin=0,
-            vmax=len(self.materials) + 1,
+            vmax=len(self.materials) + (2 if draw_pml_this_plot else 1),
         )
+        if draw_pml_this_plot:
+            # lazy import to avoid circular import
+            _draw_pml(plt.gca(), mesh=self.mesh)
+
         plt.axis("scaled")
-        plt.grid(visible=True)
+
+        if draw_mesh:
+            # lazy import to avoid circular import
+            _draw_mesh(ax, self.mesh, mesh_draw_option, linewidth=mesh_linewidth)
+        else:
+            plt.grid(visible=True)
+
+        plt.xlim(self.mesh.x[0], self.mesh.x_[-1])
+        plt.ylim(self.mesh.y[0], self.mesh.y_[-1])
+
         if cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -108,6 +135,10 @@ class Cell(BaseModel):
             for material, index in self.materials.items():
                 labels.append(material.name)
                 ticks.append(index + 0.5)
+
+            if draw_pml_this_plot:
+                labels.append("PML")
+                ticks.append(ticks[-1] + 1)
 
             _cbar = plt.colorbar(
                 ticks=ticks,

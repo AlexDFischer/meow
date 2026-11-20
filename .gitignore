@@ -46,6 +46,7 @@ pip-log.txt
 uv.lock
 
 # folders
+.claude/
 .eggs/
 .hypothesis/
 .ipynb_checkpoints/
@@ -53,6 +54,7 @@ uv.lock
 .nox/
 .pytest_cache/
 .tox/
+.vscode/
 ENV/
 __pycache__/
 __pypackages__/

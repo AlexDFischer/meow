@@ -3,8 +3,10 @@ from collections.abc import Iterator
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib.colors import ListedColormap
 
 import meow as mw
+from meow.mesh import PML_DEFAULT_RGBA
 
 show = False  # default to not showing if running from pytest
 
@@ -385,6 +387,51 @@ def test_mode_draw_structure_boundaries():
     assert np.isclose(ax.get_ylim()[1], 3, atol=0.05), (
         f"{ax.get_ylim()[1] = }, should be near 3"
     )
+
+
+@pytest.mark.parametrize("cross_section", [False, True], ids=["cell", "cross_section"])
+@pytest.mark.parametrize("draw_mesh", [False, True], ids=["no_mesh", "primal_mesh"])
+def test_pml_visualization(*, cross_section: bool, draw_mesh: bool) -> None:
+    """A single PML layer is visible along each edge away from the corners."""
+    mesh = mw.Mesh2D(x=np.arange(7), y=np.arange(7), num_pml=(1, 1))
+    cell = mw.Cell(structures=[], mesh=mesh, z_min=0, z_max=1)
+    obj = (
+        mw.CrossSection.from_cell(cell=cell, env=test_xsec.env)
+        if cross_section
+        else cell
+    )
+    fig, ax = plt.subplots()
+    ax.set_facecolor("white")
+    mw.visualize(
+        obj,
+        ax=ax,
+        cbar=False,
+        show=False,
+        draw_pml=True,
+        draw_mesh=draw_mesh,
+        n_cmap=ListedColormap(["white"]),
+    )
+    ax.grid(visible=False)
+    fig.canvas.draw()
+    assert ax.get_xlim() == (mesh.x[0], mesh.x_[-1])
+    assert ax.get_ylim() == (mesh.y[0], mesh.y_[-1])
+    assert len(ax.lines) == (len(mesh.x) + len(mesh.y) if draw_mesh else 0)
+    # Flip the image so its row coordinates match Matplotlib's display coordinates.
+    img = np.asarray(fig.canvas.renderer.buffer_rgba())[::-1, :, :3]  # ty: ignore[unresolved-attribute]
+    red, green, blue, alpha = PML_DEFAULT_RGBA
+    expected_rgb = 255 * (alpha * np.array([red, green, blue]) + (1 - alpha))
+
+    edge_interiors = {
+        "left": ((0.25, 2), (0.75, 4)),
+        "right": ((5.125, 2), (5.375, 4)),
+        "bottom": ((2, 0.25), (4, 0.75)),
+        "top": ((2, 5.125), (4, 5.375)),
+    }
+    for edge, bounds in edge_interiors.items():
+        (x0, y0), (x1, y1) = np.rint(ax.transData.transform(bounds)).astype(int)
+        pixels = img[y0:y1, x0:x1]
+        matches = np.all(np.isclose(pixels, expected_rgb, atol=2, rtol=0), axis=-1)
+        assert matches.any(), f"No PML-colored pixels along the {edge} edge"
 
 
 if __name__ == "__main__":

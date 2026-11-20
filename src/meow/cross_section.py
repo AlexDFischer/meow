@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 import numpy as np
 import shapely
 from pydantic import Field, PrivateAttr
 from shapely.ops import unary_union
 
-from meow.arrays import ComplexArray2D, IntArray2D
+from meow.arrays import ComplexArray2D, FloatArray1D, IntArray2D
 from meow.base_model import BaseModel, cached_property
 from meow.cell import (
     Cell,
@@ -19,7 +19,7 @@ from meow.cell import (
 )
 from meow.environment import Environment
 from meow.materials import ComponentType, Material
-from meow.mesh import Mesh2D
+from meow.mesh import Mesh2D, _draw_mesh, _draw_pml
 from meow.structures import Structure2D
 
 
@@ -87,6 +87,11 @@ class CrossSection(BaseModel):
             n_full = np.where(
                 self._m_full == idx, material(self.env, component=component), n_full
             )
+
+        n_full = _apply_absorbing_boundaries(
+            n_full, self.mesh, self.mesh.x_full, self.mesh.y_full
+        )
+
         self._n_full_cache[component] = n_full
         return n_full
 
@@ -138,8 +143,13 @@ class CrossSection(BaseModel):
         ax: Any = None,
         n_cmap: Any = None,
         cbar: bool = True,
+        draw_pml: bool = True,
+        draw_mesh: bool = False,
+        mesh_draw_option: str = "primal",
+        mesh_linewidth: float = 0.5,
         show: bool = True,
         index_component: ComponentType = "x",
+        index_part: Literal["real", "imag"] = "real",
         **ignored: Any,
     ) -> None:
         import matplotlib.pyplot as plt  # fmt: skip
@@ -155,11 +165,29 @@ class CrossSection(BaseModel):
             plt.sca(ax)
         else:
             ax = plt.gca()
-        n_full = np.real(self.n_full(component=index_component)).copy()
+        n_full = self.n_full(component=index_component)
+        if index_part == "real":
+            n_full = np.real(n_full)
+        elif index_part == "imag":
+            n_full = np.imag(n_full)
+        else:
+            msg = f"Invalid index_part: {index_part}. Must be 'real' or 'imag'."
+            raise ValueError(msg)
+
         n_full[0, 0] = 1.0
+
+        # X_full, Y_full, and n_full all have the same shape, so shading mode
+        # default 'auto' becomes 'nearest': each grind point has cell centered
+        # on it, extending halfway to next cell
         plt.pcolormesh(self.mesh.X_full, self.mesh.Y_full, n_full, cmap=n_cmap)
+
+        if draw_pml and self.mesh.num_pml != (0, 0):
+            _draw_pml(ax, mesh=self.mesh)
+
         plt.axis("scaled")
-        if not debug_grid:
+        if draw_mesh:
+            _draw_mesh(ax, self.mesh, mesh_draw_option, linewidth=mesh_linewidth)
+        elif not debug_grid:
             plt.grid(visible=True)
         else:
             dx = self.mesh.dx
@@ -176,6 +204,10 @@ class CrossSection(BaseModel):
             )
             plt.grid(visible=True, which="major", ls="-")
             plt.grid(visible=True, which="minor", ls=":")
+
+        plt.xlim(self.mesh.x[0], self.mesh.x_[-1])
+        plt.ylim(self.mesh.y[0], self.mesh.y_[-1])
+
         if cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -248,6 +280,43 @@ def _dual_cell_bounds(
     return x_lo, x_hi, y_lo, y_hi
 
 
+def _apply_absorbing_boundaries(
+    n: ComplexArray2D,
+    mesh: Mesh2D,
+    x: FloatArray1D,
+    y: FloatArray1D,
+) -> ComplexArray2D:
+    """Applies absorbing boundaries of `mesh` to `n` array.
+
+    `x` and `y` are 1d arrays that specify the coordinates of points in `n`. It should
+    be the case that `n.shape` is `(len(x), len(y))`. These should be either
+    `mesh.x`, `mesh.x_`, or `mesh.x_full` for `x`, and similarly `mesh.y`, `mesh.y_`,
+    or `mesh.y_full` for `y`.
+
+    Args:
+        n (ComplexArray2D): refractive index array to apply absorbing boudaries to.
+        mesh (Mesh2D): mesh containing the absorbing boundary definitions.
+        x (FloatArray1D): x-coordinates of the points in `n`.
+        y (FloatArray1D): y-coordinates of the points in `n`.
+
+    Returns:
+        ComplexArray2D: refractive index array with extinction coefficients from
+        absorbing boundaries added.
+    """
+    for boundary, distance_from_edge in [
+        (mesh._absorber_left, x - x[0]),
+        (mesh._absorber_right, x[-1] - x),
+        (mesh._absorber_top, y - y[0]),
+        (mesh._absorber_bottom, y[-1] - y),
+    ]:
+        if boundary is not None:
+            n = n + 1j * np.expand_dims(
+                boundary.extinction_coef(distance_from_edge=distance_from_edge), axis=1
+            )
+
+    return n
+
+
 def _compute_smoothed_n(  # noqa: PLR0915
     mesh: Mesh2D,
     m_full: IntArray2D,
@@ -286,7 +355,9 @@ def _compute_smoothed_n(  # noqa: PLR0915
     )
 
     if not np.any(is_interface):
-        return np.sqrt(eps)
+        n = np.sqrt(eps)
+        n = _apply_absorbing_boundaries(n, mesh, mesh.x_full[si], mesh.y_full[sj])
+        return n
 
     # Compute dual cell bounds for this component
     x_lo, x_hi, y_lo, y_hi = _dual_cell_bounds(mesh, component)
@@ -367,7 +438,9 @@ def _compute_smoothed_n(  # noqa: PLR0915
     # Write back smoothed values
     eps[ii, jj] = eps_eff
 
-    return np.sqrt(eps)
+    n = np.sqrt(eps)
+    n = _apply_absorbing_boundaries(n, mesh, mesh.x_full[si], mesh.y_full[sj])
+    return n
 
 
 def _compute_winner_takes_all_n(
@@ -409,7 +482,9 @@ def _compute_winner_takes_all_n(
     )
 
     if not np.any(is_interface):
-        return np.sqrt(eps)
+        n = np.sqrt(eps)
+        n = _apply_absorbing_boundaries(n, mesh, mesh.x_full[si], mesh.y_full[sj])
+        return n
 
     # Compute dual cell bounds and interface pixel indices
     x_lo, x_hi, y_lo, y_hi = _dual_cell_bounds(mesh, component)
@@ -462,7 +537,9 @@ def _compute_winner_takes_all_n(
     winner_eps = np.array([mat_eps[idx] for idx in best_idx])
     eps[ii, jj] = winner_eps
 
-    return np.sqrt(eps)
+    n = np.sqrt(eps)
+    n = _apply_absorbing_boundaries(n, mesh, mesh.x_full[si], mesh.y_full[sj])
+    return n
 
 
 def _effective_material_polygons(

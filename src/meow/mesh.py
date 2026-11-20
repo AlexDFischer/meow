@@ -5,11 +5,62 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 import numpy as np
-from pydantic import BeforeValidator, Field
+from matplotlib.axes import Axes
+from matplotlib.patches import Rectangle as MplRect
+from pydantic import BeforeValidator, Field, PrivateAttr
 from pydantic.types import NonNegativeInt
 
 from meow.arrays import FloatArray1D, FloatArray2D
 from meow.base_model import BaseModel, cached_property
+
+PML_DEFAULT_RGBA = (0.3, 0.3, 0.3, 0.4)
+ABSORBER_DEFAULT_RGBA = (0.6, 0.6, 0.6, 0.4)
+
+
+class AbsorberParams(BaseModel):
+    """Parameters that define absorbing boundary.
+
+    The parameters describe how slowly Im[neff] ramps up towards the edge. These are
+    separate from PMLs, and are best used when something prevents PMLs form working,
+    such as non-uniform structures extending into the boundary (eg photonic crystals).
+    """
+
+    length: float = Field(
+        description="Length in um of absorber", gt=0, allow_inf_nan=False
+    )
+
+    end_extinction_coef: float = Field(
+        description="Imaginary part that gets added to refractive index at end of \
+            absorber",
+        default=1.0,
+    )
+
+    transition_power: float = Field(
+        description="Polynomial degree of transition to higher extinction \
+            coefficient. Default 3.",
+        default=3,
+    )
+
+    def extinction_coef(self, distance_from_edge: FloatArray2D) -> FloatArray2D:
+        """Extinction coefficient (Im[n]) as function of distance from edge.
+
+        Args:
+            distance_from_edge (FloatArray2D): distance from outer boundary of
+            simulation on this side.
+
+        Returns:
+            FloatArray2D: Extinction coefficient (Im[n]) at the given distances from
+            the edge.
+        """
+        return np.select(
+            [distance_from_edge < self.length],
+            [
+                self.end_extinction_coef
+                * ((self.length - distance_from_edge) / self.length)
+                ** self.transition_power
+            ],
+            default=0,
+        )
 
 
 class Mesh2D(BaseModel):
@@ -66,11 +117,23 @@ class Mesh2D(BaseModel):
         description="Number of standard pml layers to add in the two tangential axes.",
     )
 
-    def model_post_init(self, context: Any) -> None:
-        """Runs after pydantic finishes initialization. Validates fields.
+    absorbing_boundary: AbsorberParams | None = None
+    absorbing_boundary_x: AbsorberParams | None = None
+    absorbing_boundary_y: AbsorberParams | None = None
+    absorbing_boundary_left: AbsorberParams | None = None
+    absorbing_boundary_right: AbsorberParams | None = None
+    absorbing_boundary_top: AbsorberParams | None = None
+    absorbing_boundary_bottom: AbsorberParams | None = None
 
-        Ensures that the x and y coordinates are strictly increasing.
-        """
+    # internal attributes that store the absorber for each side, determined from above
+    # options
+    _absorber_left: AbsorberParams | None = PrivateAttr(default=None)
+    _absorber_right: AbsorberParams | None = PrivateAttr(default=None)
+    _absorber_top: AbsorberParams | None = PrivateAttr(default=None)
+    _absorber_bottom: AbsorberParams | None = PrivateAttr(default=None)
+
+    def model_post_init(self, context: Any) -> None:
+        """Validate coordinates and resolve a single absorber per side."""
         super().model_post_init(context)
 
         x_diff = self.x[1:] - self.x[:-1]
@@ -82,6 +145,52 @@ class Mesh2D(BaseModel):
         if (y_diff <= 0).any():
             msg = "y coordinates must be strictly increasing"
             raise ValueError(msg)
+
+        all_sides = self.absorbing_boundary
+        x_sides = self.absorbing_boundary_x
+        y_sides = self.absorbing_boundary_y
+        left = self.absorbing_boundary_left
+        right = self.absorbing_boundary_right
+        top = self.absorbing_boundary_top
+        bottom = self.absorbing_boundary_bottom
+
+        if all_sides is not None and any(
+            absorber is not None
+            for absorber in (x_sides, y_sides, left, right, top, bottom)
+        ):
+            msg = "absorbing_boundary cannot be combined with axis or side absorbers"
+            raise ValueError(msg)
+
+        if x_sides is not None and (left is not None or right is not None):
+            msg = (
+                "absorbing_boundary_x cannot be combined with "
+                "absorbing_boundary_left or absorbing_boundary_right"
+            )
+            raise ValueError(msg)
+
+        if y_sides is not None and (top is not None or bottom is not None):
+            msg = (
+                "absorbing_boundary_y cannot be combined with "
+                "absorbing_boundary_top or absorbing_boundary_bottom"
+            )
+            raise ValueError(msg)
+
+        self._absorber_left = left or x_sides or all_sides
+        self._absorber_right = right or x_sides or all_sides
+        self._absorber_top = top or y_sides or all_sides
+        self._absorber_bottom = bottom or y_sides or all_sides
+
+        for coords, sides, absorbers in (
+            (self.x, "left and right", (self._absorber_left, self._absorber_right)),
+            (self.y, "top and bottom", (self._absorber_top, self._absorber_bottom)),
+        ):
+            span = coords[-1] - coords[0] if coords.size else 0.0
+            total_length = sum(
+                absorber.length for absorber in absorbers if absorber is not None
+            )
+            if total_length > span:
+                msg = f"{sides} boundary absorbers overlap or exceed the mesh span"
+                raise ValueError(msg)
 
     @cached_property
     def dx(self) -> FloatArray1D:
@@ -168,3 +277,129 @@ class Mesh2D(BaseModel):
     def Yz_(self) -> FloatArray2D:
         """Y at Hz locations."""
         return self.Y_full[1::2, 1::2]
+
+
+def _pml_boxes(mesh: Mesh2D) -> list[tuple[float, float, float, float]]:
+    """Get the bounding boxes of the PML regions of a ``Mesh2D``.
+
+    Args:
+        mesh: the mesh whose PML regions to compute.
+
+    Returns:
+        A list of ``(x_min, x_max, y_min, y_max)`` tuples, one per PML region.
+        The corner regions are not listed separately, as they are already
+        covered by the x- and y-bands. Returns an empty list if the mesh has no
+        PML layers.
+    """
+    numx, numy = mesh.num_pml
+    if numx == 0 and numy == 0:
+        return []
+
+    x_min = mesh.x[0]
+    x_max = mesh.x_[-1]
+    y_min = mesh.y[0]
+    y_max = mesh.y_[-1]
+
+    boxes = []
+    x_lo = x_min
+    x_hi = x_max
+    if numx > 0:
+        # full height: this also covers the four corner regions
+        x_lo = mesh.x[numx]
+        x_hi = mesh.x[-1 - numx]
+        boxes.append((x_min, x_lo, y_min, y_max))
+        boxes.append((x_hi, x_max, y_min, y_max))
+    if numy > 0:
+        # between the x-bands, such that corners are not drawn twice
+        y_lo = mesh.y[numy]
+        y_hi = mesh.y[-1 - numy]
+        boxes.append((x_lo, x_hi, y_min, y_lo))
+        boxes.append((x_lo, x_hi, y_hi, y_max))
+
+    return boxes
+
+
+def _draw_pml(
+    ax: Axes,
+    mesh: Mesh2D,
+    color: tuple[float, float, float, float] = PML_DEFAULT_RGBA,
+    zorder: float = 2,
+) -> list[MplRect]:
+    """Draw the PML regions of a mesh as grey rectangles on the given axes.
+
+    Intended to be drawn on top of an existing mode or cross-section plot
+    (whose axes are in the same coordinates as ``mesh``), such that the PML
+    regions used by the simulation are clearly indicated.
+
+    Args:
+        ax: the matplotlib axes to draw on.
+        mesh: the mesh whose PML regions to draw. Its ``x`` and ``y`` cell-edge
+            coordinates define the extents of the drawn rectangles.
+        color: the RGB color of the PML rectangles. Defaults to a mid grey.
+        alpha: the opacity of the PML rectangles. Defaults to 0.5.
+        zorder: the matplotlib z-order to draw the rectangles at. Defaults to 2,
+            which is below the mode image drawn by ``Mode._visualize``.
+
+    Returns:
+        The list of added ``matplotlib.patches.Rectangle`` patches.
+    """
+    patches = []
+    for x0, x1, y0, y1 in _pml_boxes(mesh):
+        if x1 <= x0 or y1 <= y0:
+            continue
+        rect = MplRect(
+            (x0, y0),
+            x1 - x0,
+            y1 - y0,
+            facecolor=color[:3],
+            edgecolor="none",
+            alpha=color[3],
+            zorder=zorder,
+        )
+        ax.add_patch(rect)
+        patches.append(rect)
+
+    return patches
+
+
+def _draw_mesh(
+    ax: Axes,
+    mesh: Mesh2D,
+    option: str = "primal",
+    **line_kwargs: Any,
+) -> None:
+    """Plot the mesh.
+
+    Args:
+        ax (matplotlib.axes.Axes): `Axes` object to plot mesh on. Typically you will
+        plot on top of an already drawn `Cell` or `CrossSection`.
+        mesh (Mesh2D): mesh to draw.
+        option (str, optional): which mesh to draw. Options are 'primal', which means
+        the x and y passed to `Mesh2D()` that is where Ez is on the Yee grid; 'dual',
+        which is half way between points on the primal grid and is where Hz is on the
+        Yee grid, and 'full', which draws both grids. Defaults to 'primal'.
+        line_kwargs: additional keyword arguments passed to `ax.axvline` and
+        `ax.axhline` for styling the mesh lines.
+
+    """
+    line_kwargs.setdefault("linewidth", 0.5)
+    line_kwargs.setdefault("color", "black")
+
+    if option == "primal":
+        for x in mesh.x:
+            ax.axvline(x, **line_kwargs)
+        for y in mesh.y:
+            ax.axhline(y, **line_kwargs)
+    elif option == "dual":
+        for x in mesh.x_:
+            ax.axvline(x, **line_kwargs)
+        for y in mesh.y_:
+            ax.axhline(y, **line_kwargs)
+    elif option == "full":
+        for x in mesh.x_full:
+            ax.axvline(x, **line_kwargs)
+        for y in mesh.y_full:
+            ax.axhline(y, **line_kwargs)
+    else:
+        msg = f"option must be 'primal', 'dual', or 'full', but got {option!r}"
+        raise ValueError(msg)

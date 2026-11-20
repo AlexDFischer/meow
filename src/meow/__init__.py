@@ -131,6 +131,7 @@ from meow.materials import (
     silicon_oxide,
 )
 from meow.mesh import (
+    AbsorberParams,
     Mesh2D,
 )
 from meow.mode import (
@@ -171,6 +172,7 @@ __all__ = [
     "MATERIALS",
     "MODELS",
     "VISUALIZATION_MAPPING",
+    "AbsorberParams",
     "AnisotropicDispersiveMaterial",
     "AnisotropicIndexMaterial",
     "ArraySchema",
