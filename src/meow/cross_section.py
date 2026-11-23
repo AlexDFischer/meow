@@ -176,8 +176,6 @@ class CrossSection(BaseModel):
             msg = f"Invalid index_part: {index_part}. Must be 'real' or 'imag'."
             raise ValueError(msg)
 
-        n_full[0, 0] = 1.0
-
         # X_full, Y_full, and n_full all have the same shape, so shading mode
         # default 'auto' becomes 'nearest': each grind point has cell centered
         # on it, extending halfway to next cell
