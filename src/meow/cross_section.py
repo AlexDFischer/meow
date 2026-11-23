@@ -304,11 +304,12 @@ def _apply_absorbing_boundaries(
         ComplexArray2D: refractive index array with extinction coefficients from
         absorbing boundaries added.
     """
+    # Yee components have different sample endpoints but share the mesh boundaries.
     for boundary, distance_from_edge in [
-        (mesh._absorber_left, (x - x[0])[:, None]),
-        (mesh._absorber_right, (x[-1] - x)[:, None]),
-        (mesh._absorber_top, (y[-1] - y)[None, :]),
-        (mesh._absorber_bottom, (y - y[0])[None, :]),
+        (mesh._absorber_left, (x - mesh.x[0])[:, None]),
+        (mesh._absorber_right, (mesh.x[-1] - x)[:, None]),
+        (mesh._absorber_top, (mesh.y[-1] - y)[None, :]),
+        (mesh._absorber_bottom, (y - mesh.y[0])[None, :]),
     ]:
         if boundary is not None:
             n = n + 1j * boundary.extinction_coef(distance_from_edge=distance_from_edge)

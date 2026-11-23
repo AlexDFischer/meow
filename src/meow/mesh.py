@@ -52,15 +52,13 @@ class AbsorberParams(BaseModel):
             FloatArray2D: Extinction coefficient (Im[n]) at the given distances from
             the edge.
         """
-        return np.select(
-            [distance_from_edge < self.length],
-            [
-                self.end_extinction_coef
-                * ((self.length - distance_from_edge) / self.length)
-                ** self.transition_power
-            ],
-            default=0,
+        profile = np.power(
+            (self.length - distance_from_edge) / self.length,
+            self.transition_power,
+            out=np.zeros_like(distance_from_edge, dtype=float),
+            where=distance_from_edge < self.length,
         )
+        return self.end_extinction_coef * profile
 
 
 class Mesh2D(BaseModel):
@@ -117,13 +115,34 @@ class Mesh2D(BaseModel):
         description="Number of standard pml layers to add in the two tangential axes.",
     )
 
-    absorbing_boundary: AbsorberParams | None = None
-    absorbing_boundary_x: AbsorberParams | None = None
-    absorbing_boundary_y: AbsorberParams | None = None
-    absorbing_boundary_left: AbsorberParams | None = None
-    absorbing_boundary_right: AbsorberParams | None = None
-    absorbing_boundary_top: AbsorberParams | None = None
-    absorbing_boundary_bottom: AbsorberParams | None = None
+    absorbing_boundary: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to all sides.",
+    )
+    absorbing_boundary_x: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the left and right sides.",
+    )
+    absorbing_boundary_y: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the top and bottom sides.",
+    )
+    absorbing_boundary_left: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the left side.",
+    )
+    absorbing_boundary_right: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the right side.",
+    )
+    absorbing_boundary_top: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the top side.",
+    )
+    absorbing_boundary_bottom: AbsorberParams | None = Field(
+        default=None,
+        description="Absorbing boundary applied to the bottom side.",
+    )
 
     # internal attributes that store the absorber for each side, determined from above
     # options
@@ -356,9 +375,9 @@ def _absorber_boxes(mesh: Mesh2D) -> list[tuple[float, float, float, float]]:
     x_min, x_max = mesh.x[0], mesh.x_[-1]
     y_min, y_max = mesh.y[0], mesh.y_[-1]
     x_lo = min(x_min + left.length, x_max) if left is not None else x_min
-    x_hi = max(x_max - right.length, x_lo) if right is not None else x_max
+    x_hi = min(mesh.x[-1] - right.length, x_max) if right is not None else x_max
     y_lo = min(y_min + bottom.length, y_max) if bottom is not None else y_min
-    y_hi = max(y_max - top.length, y_lo) if top is not None else y_max
+    y_hi = min(mesh.y[-1] - top.length, y_max) if top is not None else y_max
 
     return [
         box
