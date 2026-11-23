@@ -11,6 +11,7 @@ from pydantic import Field
 from scipy.ndimage import binary_dilation
 from shapely.ops import unary_union
 
+from meow._colorbar import colorbar_axes
 from meow.arrays import Dim, DType, IntArray2D, NDArray
 from meow.base_model import BaseModel, cached_property
 from meow.materials import Material
@@ -93,7 +94,6 @@ class Cell(BaseModel):
     ) -> None:
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap, to_rgba
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         draw_pml_this_plot = draw_pml and self.mesh.num_pml != (0, 0)
 
@@ -143,8 +143,6 @@ class Cell(BaseModel):
         plt.ylim(self.mesh.y[0], self.mesh.y_[-1])
 
         if cbar:
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="5%", pad=0.05)
             labels = ["vacuum"]
             ticks = [0.5]
             for material, index in self.materials.items():
@@ -161,7 +159,7 @@ class Cell(BaseModel):
 
             _cbar = plt.colorbar(
                 ticks=ticks,
-                cax=cax,
+                cax=colorbar_axes(ax),
             )
             _cbar.ax.set_yticklabels(labels, va="center")
             plt.sca(ax)

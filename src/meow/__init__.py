@@ -95,6 +95,9 @@ from meow.fde import (
 from meow.gds_structures import (
     GdsExtrusionRule,
     extrude_gds,
+    extrude_gdsf_component,
+    extrude_gdspy_cell,
+    extrude_gdstk_cell,
 )
 from meow.geometries import (
     AxisDirection,
@@ -124,6 +127,7 @@ from meow.materials import (
     SampledMaterial,
     SampledUniaxialMaterial,
     SellmeierModel,
+    SpatiallyVaryingMaterial,
     TidyMaterial,
     UniaxialDispersiveMaterial,
     silicon,
@@ -223,6 +227,7 @@ __all__ = [
     "SerializedArray",
     "Shape",
     "Sim",
+    "SpatiallyVaryingMaterial",
     "Structure",
     "Structure2D",
     "Structure3D",
@@ -257,6 +262,9 @@ __all__ = [
     "enforce_passivity",
     "environment",
     "extrude_gds",
+    "extrude_gdsf_component",
+    "extrude_gdspy_cell",
+    "extrude_gdstk_cell",
     "fde",
     "filter_modes",
     "gds_structures",
