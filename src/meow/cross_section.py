@@ -137,7 +137,7 @@ class CrossSection(BaseModel):
             self.mesh, self._m_full, self.materials, self.env, self.structures, "z"
         )
 
-    def _visualize(
+    def _visualize(  # noqa: PLR0915 # can't fit this in 50 statements
         self,
         *,
         ax: Any = None,
@@ -155,6 +155,7 @@ class CrossSection(BaseModel):
     ) -> None:
         import matplotlib.pyplot as plt  # fmt: skip
         from matplotlib import colors  # fmt: skip
+        from matplotlib.ticker import MaxNLocator  # fmt: skip
         from mpl_toolkits.axes_grid1 import make_axes_locatable  # fmt: skip
 
         debug_grid = ignored.pop("debug_grid", False)
@@ -213,12 +214,11 @@ class CrossSection(BaseModel):
         if cbar:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
-            values = np.unique(np.real(n_full))
-            _cbar = plt.colorbar(ticks=values, cax=cax)
-            # material_names = ['vacuum'] + [mat.name for mat in self.cell.materials]
-            # labels = [f"\n{n}\n{v:.3f}" for n, v in zip(material_names, values)]
-            labels = [f"{v:.3f}" for v in values]
-            _cbar.ax.set_yticklabels(labels, va="center")
+            values = np.unique(n_full)
+            if values.size <= 8:
+                plt.colorbar(ticks=values, cax=cax, format="%.3f")
+            else:
+                plt.colorbar(ticks=MaxNLocator(nbins=6), cax=cax)
         if show:
             plt.show()
 

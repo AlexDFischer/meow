@@ -32,7 +32,7 @@ class AbsorberParams(BaseModel):
     end_extinction_coef: float = Field(
         description="Imaginary part that gets added to refractive index at end of \
             absorber",
-        default=1.0,
+        default=0.3,
     )
 
     transition_power: float = Field(
@@ -42,11 +42,11 @@ class AbsorberParams(BaseModel):
     )
 
     def extinction_coef(self, distance_from_edge: FloatArray2D) -> FloatArray2D:
-        """Extinction coefficient (Im[n]) as function of distance from edge.
+        """Extinction coefficient (Im[n]) as function of distance from outer boundary.
 
         Args:
-            distance_from_edge (FloatArray2D): distance from outer boundary of
-            simulation on this side.
+            distance_from_edge (FloatArray2D): distance from outer boundary (boundary
+            with max absorption) of simulation on this side.
 
         Returns:
             FloatArray2D: Extinction coefficient (Im[n]) at the given distances from

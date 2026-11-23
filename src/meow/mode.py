@@ -107,6 +107,11 @@ class Mode(BaseModel):
         """The mesh of the mode."""
         return self.cs.mesh
 
+    @property
+    def loss_dB_per_um(self) -> float:
+        """Loss, in dB per μm."""
+        return 20 * 2 * np.pi * np.imag(self.neff) * np.log10(np.e) / self.env.wl
+
     def _visualize(
         self,
         *,
