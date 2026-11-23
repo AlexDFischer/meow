@@ -6,7 +6,7 @@ import pytest
 from matplotlib.colors import ListedColormap
 
 import meow as mw
-from meow.mesh import PML_DEFAULT_RGBA
+from meow.mesh import ABSORBER_DEFAULT_RGBA, PML_DEFAULT_RGBA
 
 show = False  # default to not showing if running from pytest
 
@@ -432,6 +432,47 @@ def test_pml_visualization(*, cross_section: bool, draw_mesh: bool) -> None:
         pixels = img[y0:y1, x0:x1]
         matches = np.all(np.isclose(pixels, expected_rgb, atol=2, rtol=0), axis=-1)
         assert matches.any(), f"No PML-colored pixels along the {edge} edge"
+
+
+@pytest.mark.parametrize("draw_pml", [False, True], ids=["no_pml", "pml"])
+@pytest.mark.parametrize(
+    "draw_absorbers", [False, True], ids=["no_absorbers", "absorbers"]
+)
+def test_cross_section_boundary_colors(*, draw_pml: bool, draw_absorbers: bool) -> None:
+    """Each enabled overlay contributes its default color over white vacuum."""
+    # Use thinner PML bands on x and wider absorber bands on y so each
+    # overlay has a region of white vacuum to itself even when both are drawn.
+    mesh = mw.Mesh2D(
+        x=np.linspace(-4, 4, 17),
+        y=np.linspace(-4, 4, 17),
+        num_pml=(1, 0),
+        absorbing_boundary_y=mw.AbsorberParams(length=1.5),
+    )
+    cell = mw.Cell(structures=test_structures, mesh=mesh, z_min=-1, z_max=1)
+    cross_section = mw.CrossSection.from_cell(cell=cell, env=test_xsec.env)
+    fig, ax = plt.subplots(facecolor="white")
+    mw.visualize(
+        cross_section,
+        ax=ax,
+        cbar=False,
+        show=False,
+        n_cmap=ListedColormap(["white", "blue"]),
+        draw_pml=draw_pml,
+        draw_absorbers=draw_absorbers,
+    )
+    # Antialiased axis decorations can match the blended overlay colors.
+    ax.set_axis_off()
+    fig.canvas.draw()
+    pixels = np.asarray(fig.canvas.renderer.buffer_rgba())[:, :, :3]  # ty: ignore[unresolved-attribute]
+
+    for name, rgba, enabled in (
+        ("PML", PML_DEFAULT_RGBA, draw_pml),
+        ("adiabatic absorber", ABSORBER_DEFAULT_RGBA, draw_absorbers),
+    ):
+        red, green, blue, alpha = rgba
+        expected_rgb = 255 * (alpha * np.array([red, green, blue]) + (1 - alpha))
+        matches = np.all(np.isclose(pixels, expected_rgb, atol=2, rtol=0), axis=-1)
+        assert bool(matches.any()) == enabled, f"Unexpected {name} color visibility"
 
 
 if __name__ == "__main__":
