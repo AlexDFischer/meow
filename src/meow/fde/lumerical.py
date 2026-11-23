@@ -11,6 +11,10 @@ from pydantic import PositiveInt
 from meow.arrays import ComplexArray2D
 from meow.cross_section import CrossSection
 from meow.environment import Environment
+from meow.fde._validation import (
+    reject_adiabatic_absorbers,
+    require_uniform_isotropic_material,
+)
 from meow.fde.post_process import post_process_modes
 from meow.mode import Mode
 from meow.structures import Structure3D
@@ -39,15 +43,7 @@ def compute_modes_lumerical(
     Returns:
         The computed and post-processed list of modes.
     """
-    from lumapi import (  # ty: ignore[unresolved-import]
-        LumApiError,  # type: ignore[reportMissingImports]
-    )
-
-    sim = get_sim(sim=sim)
-
-    if sim is None:
-        msg = "Lumerical simulation object not given or found."
-        raise RuntimeError(msg)
+    reject_adiabatic_absorbers(cs.mesh, "Lumerical")
 
     cell = cs._cell
 
@@ -58,10 +54,18 @@ def compute_modes_lumerical(
         )
         raise ValueError(msg)
 
+    for structure in cell.structures:
+        require_uniform_isotropic_material(structure.material, "Lumerical")
+
     _assert_default_mesh_setting(cell.mesh.angle_phi == 0, "angle_phi")
     _assert_default_mesh_setting(cell.mesh.angle_theta == 0, "angle_theta")
     _assert_default_mesh_setting(cell.mesh.bend_radius is None, "bend_radius")
 
+    from lumapi import (  # ty: ignore[unresolved-import]
+        LumApiError,  # type: ignore[reportMissingImports]
+    )
+
+    sim = get_sim(sim=sim)
     create_lumerical_geometries(sim, cell.structures, cs.env, unit)
 
     sim.select("FDE")
@@ -143,6 +147,9 @@ def create_lumerical_geometries(
         env: the environment containing material/wavelength info.
         unit: unit scaling factor.
     """
+    for structure in structures:
+        require_uniform_isotropic_material(structure.material, "Lumerical")
+
     sim = get_sim(sim=sim)
     sim.switchtolayout()
     sim.deleteall()

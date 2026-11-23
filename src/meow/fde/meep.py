@@ -10,6 +10,10 @@ from pydantic import PositiveFloat, PositiveInt
 
 from meow.cross_section import CrossSection
 from meow.environment import Environment
+from meow.fde._validation import (
+    reject_adiabatic_absorbers,
+    require_uniform_isotropic_material,
+)
 from meow.fde.post_process import post_process_modes
 from meow.geometries import Polygon2D, Rectangle
 from meow.materials import Material
@@ -45,6 +49,13 @@ def compute_modes_meep(
     if precision != "double":
         msg = "compute_modes_meep does not yet support precision != 'double'."
         raise NotImplementedError(msg)
+
+    reject_adiabatic_absorbers(cs.mesh, "Meep")
+    if any(cs.mesh.num_pml):
+        msg = "The Meep backend does not support num_pml."
+        raise NotImplementedError(msg)
+    for material in cs.materials:
+        _lossless_index(material, cs.env)
 
     # The mode-solve grid must match the CrossSection's own declared mesh
     # (cs.mesh.x / cs.mesh.y) rather than the raw bounding box of the
@@ -199,7 +210,20 @@ def meep_material(material: Material, env: Environment) -> tuple[float, Any]:
     table, so an analytic material (a Sellmeier/Lorentzian model, say) works
     here unchanged — `params["wl"]` would have raised.
     """
+    n = _lossless_index(material, env)
+
     import meep as mp  # ty: ignore[unresolved-import]
 
-    n = material(env)
-    return n.real, mp.Medium(epsilon=n.real**2)
+    return n, mp.Medium(epsilon=n**2)
+
+
+def _lossless_index(material: Material, env: Environment) -> float:
+    require_uniform_isotropic_material(material, "Meep")
+    n = complex(material(env))
+    if n.imag != 0:
+        msg = (
+            "The Meep backend does not support a complex index "
+            f"for material {material.name!r}."
+        )
+        raise NotImplementedError(msg)
+    return n.real
