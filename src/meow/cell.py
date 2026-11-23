@@ -154,7 +154,7 @@ class Cell(BaseModel):
                 ticks.append(ticks[-1] + 1)
 
             if absorber_boxes:
-                labels.append("Adiabatic absorber")
+                labels.append("Absorber")
                 ticks.append(ticks[-1] + 1)
 
             _cbar = plt.colorbar(
