@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Rectangle as MplRect
-from pydantic import BeforeValidator, Field, PrivateAttr
+from pydantic import BeforeValidator, Field
 from pydantic.types import NonNegativeInt
 
 from meow.arrays import FloatArray1D, FloatArray2D
@@ -33,12 +33,16 @@ class AbsorberParams(BaseModel):
         description="Imaginary part that gets added to refractive index at end of \
             absorber",
         default=0.3,
+        ge=0,
+        allow_inf_nan=False,
     )
 
     transition_power: float = Field(
         description="Polynomial degree of transition to higher extinction \
             coefficient. Default 3.",
         default=3,
+        gt=0,
+        allow_inf_nan=False,
     )
 
     def extinction_coef(self, distance_from_edge: FloatArray2D) -> FloatArray2D:
@@ -144,12 +148,37 @@ class Mesh2D(BaseModel):
         description="Absorbing boundary applied to the bottom side.",
     )
 
-    # internal attributes that store the absorber for each side, determined from above
-    # options
-    _absorber_left: AbsorberParams | None = PrivateAttr(default=None)
-    _absorber_right: AbsorberParams | None = PrivateAttr(default=None)
-    _absorber_top: AbsorberParams | None = PrivateAttr(default=None)
-    _absorber_bottom: AbsorberParams | None = PrivateAttr(default=None)
+    @property
+    def _absorber_left(self) -> AbsorberParams | None:
+        return (
+            self.absorbing_boundary_left
+            or self.absorbing_boundary_x
+            or self.absorbing_boundary
+        )
+
+    @property
+    def _absorber_right(self) -> AbsorberParams | None:
+        return (
+            self.absorbing_boundary_right
+            or self.absorbing_boundary_x
+            or self.absorbing_boundary
+        )
+
+    @property
+    def _absorber_top(self) -> AbsorberParams | None:
+        return (
+            self.absorbing_boundary_top
+            or self.absorbing_boundary_y
+            or self.absorbing_boundary
+        )
+
+    @property
+    def _absorber_bottom(self) -> AbsorberParams | None:
+        return (
+            self.absorbing_boundary_bottom
+            or self.absorbing_boundary_y
+            or self.absorbing_boundary
+        )
 
     def model_post_init(self, context: Any) -> None:
         """Validate coordinates and resolve a single absorber per side."""
@@ -193,11 +222,6 @@ class Mesh2D(BaseModel):
                 "absorbing_boundary_top or absorbing_boundary_bottom"
             )
             raise ValueError(msg)
-
-        self._absorber_left = left or x_sides or all_sides
-        self._absorber_right = right or x_sides or all_sides
-        self._absorber_top = top or y_sides or all_sides
-        self._absorber_bottom = bottom or y_sides or all_sides
 
         for coords, sides, absorbers in (
             (self.x, "left and right", (self._absorber_left, self._absorber_right)),

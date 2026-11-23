@@ -1,8 +1,26 @@
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 import meow as mw
 from meow import AbsorberParams
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("end_extinction_coef", -0.1),
+        ("end_extinction_coef", np.inf),
+        ("end_extinction_coef", np.nan),
+        ("transition_power", -1),
+        ("transition_power", 0),
+        ("transition_power", np.inf),
+        ("transition_power", np.nan),
+    ],
+)
+def test_absorber_rejects_invalid_profile(field: str, value: float) -> None:
+    with pytest.raises(ValidationError, match=field):
+        AbsorberParams(length=1, **{field: value})
 
 
 def test_absorber_extinction():
@@ -11,6 +29,21 @@ def test_absorber_extinction():
     extinction = absorber.extinction_coef(distance)
     assert extinction.shape == distance.shape
     assert np.allclose(extinction, 0.2 * ((3 - distance) / 3) ** 2)
+
+
+def test_absorber_resolution_after_mesh_copy() -> None:
+    # Test that model_copy copies private fields, which it didn't do under a previous
+    # way I had set them up
+    mesh = mw.Mesh2D(x=np.arange(5), y=np.arange(5))
+    absorber = AbsorberParams(length=1)
+    with_absorber = mesh.model_copy(update={"absorbing_boundary_right": absorber})
+    without_absorber = with_absorber.model_copy(
+        update={"absorbing_boundary_right": None}
+    )
+
+    assert mesh._absorber_right is None
+    assert with_absorber._absorber_right is absorber
+    assert without_absorber._absorber_right is None
 
 
 def test_absorber_resolution():
